@@ -2,7 +2,7 @@
 
     python3 exercises/10_camera_tf/project.py
 
-Then open http://<robot>:8000.
+Then open http://localhost:8000.
 """
 
 from __future__ import annotations

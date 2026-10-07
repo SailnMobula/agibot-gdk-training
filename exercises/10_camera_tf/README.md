@@ -19,7 +19,7 @@ It maps a point given in the optical frame of the head camera into `head_link3`.
 
 ## Try
 
-- Open `http://<robot>:8000` with both arms in view of the head camera. With the fake the address is `http://localhost:8000`.
+- Open `http://localhost:8000` in the browser of the PC that runs the script, with both arms in view of the head camera.
 - Jog the head with `s` and `w`. Then select an arm joint with `d` and jog it.
 
 ## Look for

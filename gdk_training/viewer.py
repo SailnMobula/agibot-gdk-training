@@ -1,9 +1,10 @@
-"""Shows images in the browser. The robot has no screen, so the exercises serve MJPEG over HTTP.
+"""Shows images in the browser. The exercises serve them as MJPEG over HTTP.
 
     viewer.serve({"head": lambda: grab(camera, agibot_gdk.CameraType.kHeadColor)})
 
 Each stream is a function returning a BGR image (h, w, 3) uint8 or a depth image (h, w) uint16
-in mm, or None when there is no frame yet. Open http://<robot>:8000.
+in mm, or None when there is no frame yet. Open http://localhost:8000 on the machine that runs
+the script, or http://<address>:8000 from another machine.
 """
 
 from __future__ import annotations
@@ -87,5 +88,5 @@ def start(streams: Mapping[str, Stream], port: int = 8000, hz: float = 10.0) -> 
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"viewer on port {port}, open http://<robot>:{port} or http://localhost:{port}")
+    print(f"viewer on port {port}, open http://localhost:{port} on this machine")
     return server
