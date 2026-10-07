@@ -8,6 +8,7 @@ Each printed line is one step. A failed step ends the check and prints what to l
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 ENV = ("ROBOT_IP", "LOCATOR_IP", "AORTA_DISCOVERY_URI", "GDK_APP")
 
@@ -55,8 +57,12 @@ def port_open(host: str, port: int) -> bool:
 
 
 def main() -> None:
-    report(sys.version_info[:2] == (3, 10), f"Python {sys.version.split()[0]}",
-           "The GDK binding for the laptop is built for Python 3.10. Use `source real.sh`.")
+    tag = f"cpython-{sys.version_info.major}{sys.version_info.minor}"
+    spec = importlib.util.find_spec("agibot_gdk")
+    folder = Path(spec.submodule_search_locations[0]) if spec and spec.submodule_search_locations else None
+    report(folder is not None and any(folder.glob(f"*{tag}*.so")),
+           f"Python {sys.version.split()[0]} with agibot_gdk from {folder}",
+           "No agibot_gdk binding for this Python version was found. Build the wheel and install it, see SETUP.md.")
     missing = [name for name in ENV if not os.environ.get(name)]
     report(not missing, "environment " + ", ".join(f"{n}={os.environ[n]}" for n in ENV if n in os.environ),
            f"missing {', '.join(missing)}. Run `source real.sh [ROBOT_IP]` in this shell first.")

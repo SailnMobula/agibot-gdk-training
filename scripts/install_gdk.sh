@@ -48,4 +48,5 @@ echo
 echo "Installed GDK:"
 sed -n 1,2p "${GDK_HOME}/app/gdk/version"
 ls "${GDK_HOME}/app/gdk/lib/agibot_gdk" | grep '\.so$'
-echo "The binding is built for the Python version in its file name. Use that version, see README.md."
+echo "The binding above is built for the Python version in its file name."
+echo "This repository uses Python 3.12. Build the binding for it as described in SETUP.md."

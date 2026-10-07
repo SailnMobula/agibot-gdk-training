@@ -9,12 +9,13 @@ on x86_64, made on 2026-10-07. Other units can differ.
 ```bash
 scripts/install_gdk.sh <ROBOT_IP>     # once
 uv sync                               # once
+uv pip install <agibot_gdk wheel for Python 3.12>     # once, see "Python binding"
 source real.sh <ROBOT_IP>             # in every new shell
 python -m gdk_training.doctor
 ```
 
 Over the Debug cable the address can be left out in both commands. `uv sync` reads
-`.python-version` and downloads Python 3.10 when the laptop does not have it.
+`.python-version` and creates the environment `.venv` with Python 3.12.
 
 The doctor only reads from the robot. It ends with `All checks passed.` when the GDK can read
 the joints, TF and the head camera. After that every exercise runs the same way as with the
@@ -25,8 +26,8 @@ fake, for example `python exercises/01_joints/joints.py`.
 ```
  Laptop, x86_64                                          G2 robot, aarch64
  --------------------------------                        ---------------------------------
- Python 3.10 in .venv                                    system Python 3.12
-   agibot_gdk for CPython 3.10                             agibot_gdk for CPython 3.12
+ Python 3.12 in .venv                                    system Python 3.12
+   agibot_gdk wheel built for CPython 3.12                 agibot_gdk for CPython 3.12
    libgdk_core, libgdk_dds, libgdk_adapter                 gdk_service and the robot nodes
           |                                                        |
           |  1. discovery, HTTP  ---------------------------->  AORTA service (etcd)    port 2379
@@ -34,23 +35,46 @@ fake, for example `python exercises/01_joints/joints.py`.
           |  3. install only, HTTP  ------------------------->  gdk_http_server         port 8849
 ```
 
-- The laptop and the robot can use different Python versions. They exchange data over the
-  network, and each side has the binding for its own CPU and Python.
-- The package the robot serves for laptops contains the binding for CPython 3.10 on x86_64 and
-  its own `libpython3.10.so`. The laptop therefore needs Python 3.10. With Python 3.12 the import
-  fails with `No module named 'agibot_gdk.agibot_gdk'`.
+- The laptop and the robot exchange data over the network. Each side needs the binding for its
+  own CPU and Python version.
+- The package the robot serves for laptops contains a prebuilt binding for CPython 3.10 on
+  x86_64. This repository uses Python 3.12, so the laptop needs a binding built for 3.12. The
+  section [Python binding](#python-binding) describes the build. A Python version without a
+  matching binding fails with `No module named 'agibot_gdk.agibot_gdk'`.
 - The GDK finds the robot through the discovery service. It reads the address of that service
   from `AORTA_DISCOVERY_URI`. When the variable is missing, the GDK uses `http://127.0.0.1:2379`
   and logs `aorta domain init failed`.
 - The robot has several networks. Its address on the Debug port is always `10.42.1.101`. Its
   Wi-Fi address comes from the router and can change, so check it before a session.
 
+## Python binding
+
+The GDK package contains the sources of the Python binding in
+`~/.cache/agibot/app/gdk/build_dep/python/pybind/`. Build a wheel for Python 3.12 from them and
+install it into the environment of this repository.
+
+```bash
+sudo apt update && sudo apt install -y libprotobuf-dev protobuf-compiler
+source .venv/bin/activate
+uv pip install pybind11 setuptools wheel
+cd ~/.cache/agibot/app/gdk/build_dep/python/pybind/
+python setup.py bdist_wheel --dist-dir dist
+uv pip install dist/agibot_gdk-*.whl
+```
+
+`uv sync` removes packages that are not in `uv.lock`, and the wheel is one of them. Install the
+wheel again after a `uv sync`, or run `uv sync --inexact`, which keeps it.
+
+`real.sh` prints the folder of the binding it found. It stops with a message when no binding
+fits the active Python version.
+
 ## What is installed where
 
 | Item | Location | Created by |
 | --- | --- | --- |
 | GDK package with libraries, binding and examples | `~/.cache/agibot/app` | `scripts/install_gdk.sh` |
-| Python 3.10 interpreter | `~/.local/share/uv/python/` | `uv sync` |
+| Python 3.12 interpreter | system, or `~/.local/share/uv/python/` | `uv sync` |
+| `agibot_gdk` wheel for Python 3.12 | `.venv/` in this repository | `uv pip install` |
 | Python environment | `.venv/` in this repository | `uv sync` |
 
 `real.sh` sets the environment for the current shell and writes nothing to your dotfiles.
@@ -61,8 +85,8 @@ fake, for example `python exercises/01_joints/joints.py`.
 | Variable | Value | Needed |
 | --- | --- | --- |
 | `AORTA_DISCOVERY_URI` | `http://<ROBOT_IP>:2379` | Yes. Without it the GDK looks on `127.0.0.1` and fails. |
-| `LD_LIBRARY_PATH` | every folder with libraries below `~/.cache/agibot/app/lib` | Yes. The binding links the GDK libraries and `libpython3.10.so`. |
-| `PYTHONPATH` | `~/.cache/agibot/app/gdk/lib` and this repository | Yes. |
+| `LD_LIBRARY_PATH` | every folder with libraries below `~/.cache/agibot/app/lib` | Yes. The binding links the GDK libraries. |
+| `PYTHONPATH` | this repository. The folder `~/.cache/agibot/app/gdk/lib` is added only when its prebuilt binding fits the active Python. | Yes. |
 | `LOCATOR_IP` | address of the laptop on the route to the robot | Recommended. The vendor script sets it. Reading also worked without it. |
 | `DEV_IP` | same as `LOCATOR_IP` | Recommended. The DDS profile of the package uses it. |
 | `APP_CONF_PATH` | `~/.cache/agibot/app/gdk/config/app_conf.json` | Optional. |
@@ -130,7 +154,8 @@ The answer `No route to host` means that the firewall rejects the robot.
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `aorta domain init failed: http://127.0.0.1:2379` | `AORTA_DISCOVERY_URI` is not set. | Run `source real.sh <ROBOT_IP>`. |
-| `No module named 'agibot_gdk.agibot_gdk'` | The Python version is not 3.10. | Use the `.venv` of this repository. `source real.sh` activates it. |
+| `No module named 'agibot_gdk.agibot_gdk'` | Python found a binding for another Python version. | Install the wheel for Python 3.12 into `.venv`, see [Python binding](#python-binding). |
+| `real.sh` reports that no binding was found. | The wheel is not installed in `.venv`. `uv sync` removes it again. | Install the wheel again with `uv pip install`. |
 | `libgdk_core.so.3: cannot open shared object file` | `LD_LIBRARY_PATH` is not set. | Run `source real.sh`. |
 | The installer ends with `curl: (7)` or a timeout. | The robot is not reachable. | Check the address with `ping <ROBOT_IP>`. The Wi-Fi address can have changed. |
 | The doctor stops at `AORTA discovery`. | There is no route to the robot, or the service on the robot is down. | Check the address and the network. |
@@ -143,5 +168,5 @@ The answer `No route to host` means that the firewall rejects the robot.
 | Vendor | This repository | Reason |
 | --- | --- | --- |
 | `curl http://10.42.1.101:8849/install.sh \| bash` | `scripts/install_gdk.sh [ROBOT_IP]` | The robot address is a parameter, an interrupted download resumes, and the old install stays until the new one is ready. |
-| `source ~/.cache/agibot/app/env.sh` | `source real.sh [ROBOT_IP]` | It works over Wi-Fi and LAN, activates Python 3.10 and reports a missing setup. |
-| `python3 mc_example.py` | `python` from `.venv` | `python3` on Ubuntu 24.04 is Python 3.12 and cannot load the binding. |
+| `source ~/.cache/agibot/app/env.sh` | `source real.sh [ROBOT_IP]` | It works over Wi-Fi and LAN, activates the environment and reports a missing setup. |
+| prebuilt binding for Python 3.10 | wheel built for Python 3.12 | The exercises and the robot use Python 3.12. |

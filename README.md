@@ -30,18 +30,21 @@ README lists the fields of the GDK calls you need. The reference implementation 
 
 The scripts run on your laptop and talk to the robot over the network. This works over the
 Debug cable and over Wi-Fi. The laptop needs Linux on x86_64, because the GDK package for
-laptops is built for that platform and for Python 3.10.
+laptops is built for that platform.
 
 ```bash
 scripts/install_gdk.sh <ROBOT_IP>     # once
 uv sync                               # once
+uv pip install <agibot_gdk wheel for Python 3.12>     # once
 source real.sh <ROBOT_IP>             # in every new shell
 python -m gdk_training.doctor
 python exercises/01_joints/joints.py
 ```
 
 `scripts/install_gdk.sh` downloads the GDK from the robot into `~/.cache/agibot/app`.
-`uv sync` creates a Python 3.10 environment in `.venv`. `real.sh` sets the environment for the
+`uv sync` creates a Python 3.12 environment in `.venv`. The GDK package only contains a binding
+for Python 3.10, so the laptop needs an `agibot_gdk` wheel built for Python 3.12.
+[SETUP.md](SETUP.md#python-binding) describes the build. `real.sh` sets the environment for the
 GDK and activates `.venv`. The doctor checks the connection and only reads from the robot.
 Over the Debug cable the robot has the address `10.42.1.101`, and `<ROBOT_IP>` can be left out.
 

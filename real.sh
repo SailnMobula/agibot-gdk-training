@@ -49,12 +49,28 @@ case ":${LD_LIBRARY_PATH:-}:" in
     *":${_gdk_libs%%:*}:"*) ;;
     *) export LD_LIBRARY_PATH="${_gdk_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
 esac
-export PYTHONPATH="$GDK_APP/gdk/lib:$_gdk_root"
-
-# The binding is built for CPython 3.10. The environment of this repository uses that version.
+# The environment of this repository uses Python 3.12.
 [ -f "$_gdk_root/.venv/bin/activate" ] && source "$_gdk_root/.venv/bin/activate"
 
-echo "GDK:    $(sed -n 1p "$GDK_APP/gdk/version")"
-echo "Robot:  $ROBOT_IP   this laptop: $LOCATOR_IP   AORTA: $AORTA_DISCOVERY_URI"
-echo "Python: $(python --version 2>&1)"
-unset _gdk_root _gdk_local_ip _gdk_libs
+# The package from the robot contains a binding for one Python version only. It goes on the
+# Python path when it fits the active Python. Otherwise Python uses the agibot_gdk wheel that
+# is installed in the environment, see SETUP.md.
+_gdk_tag="$(python -c 'import sys; print(f"cpython-{sys.version_info.major}{sys.version_info.minor}")')"
+if ls "$GDK_APP/gdk/lib/agibot_gdk/"*"$_gdk_tag"*.so > /dev/null 2>&1; then
+    export PYTHONPATH="$GDK_APP/gdk/lib:$_gdk_root"
+else
+    export PYTHONPATH="$_gdk_root"
+fi
+_gdk_binding="$(python -c 'import importlib.util as u; s = u.find_spec("agibot_gdk"); print(s.submodule_search_locations[0] if s and s.submodule_search_locations else "")' 2> /dev/null)"
+if [ -z "$_gdk_binding" ] || ! ls "$_gdk_binding/"*"$_gdk_tag"*.so > /dev/null 2>&1; then
+    echo "real.sh: No agibot_gdk binding for $(python --version 2>&1) was found." >&2
+    echo "         Build the wheel for this Python and install it into .venv, see SETUP.md." >&2
+    unset _gdk_root _gdk_local_ip _gdk_libs _gdk_tag _gdk_binding
+    return 1
+fi
+
+echo "GDK:     $(sed -n 1p "$GDK_APP/gdk/version")"
+echo "Robot:   $ROBOT_IP   this laptop: $LOCATOR_IP   AORTA: $AORTA_DISCOVERY_URI"
+echo "Python:  $(python --version 2>&1)"
+echo "Binding: $_gdk_binding"
+unset _gdk_root _gdk_local_ip _gdk_libs _gdk_tag _gdk_binding
