@@ -1,0 +1,19 @@
+[project]
+name = "gdk-training"
+version = "0.1.0"
+description = "Exercises for the AGIBOT G2 on GDK 3.3.8 covering robot state, joint motion, gripper, TF and camera"
+requires-python = ">=3.12,<3.13"
+license = "Apache-2.0"
+dependencies = [
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
