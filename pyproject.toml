@@ -2,7 +2,7 @@
 name = "gdk-training"
 version = "0.1.0"
 description = "Exercises for the AGIBOT G2 on GDK 3.3.8 covering robot state, joint motion, gripper, TF and camera"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.11"
 license = "Apache-2.0"
 dependencies = [
     "numpy>=1.26",

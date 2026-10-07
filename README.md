@@ -23,76 +23,57 @@ Each folder in `exercises/` has a `README.md` with the task. Open functions are 
 `TODO` and raise `NotImplementedError` until you write them. The docstring of each
 function states what it has to return, and the small classes at the top of a script name the
 fields and their units. The Returns section of each
-README lists the fields of the GDK calls you need. The Python pages `robot`, `tf` and `camera`
-of the GDK 3.3.8 reference describe every call in full. The reference implementation is in
+README lists the fields of the GDK calls you need. The reference implementation is in
 `solutions/`.
 
-## With the robot
+## On a laptop with the robot
 
-The scripts run on your PC and talk to the robot over the network cable. The GDK calls this
-hybrid deployment. It needs Ubuntu 22.04 on x86_64.
-
-1. Connect the PC to the Debug port of the robot with an Ethernet cable. Give the network
-   interface of the PC the static address `10.42.1.102` with netmask `255.255.255.0`. On this
-   network the robot has the fixed address `10.42.1.101`. A second PC on the same network needs
-   another free address, for example `10.42.1.103`.
-
-   ```bash
-   ping 10.42.1.101
-   ```
-
-2. Install the GDK on the PC. The installer puts it into `~/.cache/agibot/app`.
-
-   ```bash
-   curl -sSL http://10.42.1.101:8849/install.sh | bash
-   ```
-
-3. Install the two Python packages the exercises need.
-
-   ```bash
-   python3 -m pip install numpy opencv-python-headless
-   ```
-
-4. Clone this repository and run the first exercise.
-
-   ```bash
-   git clone <this repository> && cd gdk-training
-   source robot.sh
-   python3 exercises/01_joints/joints.py
-   ```
-
-The prebuilt GDK is made for Python 3.10, which is the `python3` of Ubuntu 22.04. The exercises
-run on Python 3.10 and newer, so use the system `python3`. There is no need to build the GDK for
-another Python version. On a system with a newer `python3`, create a Python 3.10 environment and
-work in it.
+The scripts run on your laptop and talk to the robot over the network. This works over the
+Debug cable and over Wi-Fi. The laptop needs Linux on x86_64, because the GDK package for
+laptops is built for that platform and for Python 3.10.
 
 ```bash
-uv venv --python 3.10 && source .venv/bin/activate
-uv pip install numpy opencv-python-headless
+scripts/install_gdk.sh <ROBOT_IP>     # once
+uv sync                               # once
+source real.sh <ROBOT_IP>             # in every new shell
+python -m gdk_training.doctor
+python exercises/01_joints/joints.py
 ```
 
-The GDK reaches the robot only through the `10.42.1.x` network of the Debug port. The address
-the robot has in the Wi-Fi network is useful for `ssh`, but the GDK on a PC cannot use it.
-`robot.sh` prints a warning when the PC has no `10.42.1.x` address or when `python3` does not
-match the Python version of the GDK.
+`scripts/install_gdk.sh` downloads the GDK from the robot into `~/.cache/agibot/app`.
+`uv sync` creates a Python 3.10 environment in `.venv`. `real.sh` sets the environment for the
+GDK and activates `.venv`. The doctor checks the connection and only reads from the robot.
+Over the Debug cable the robot has the address `10.42.1.101`, and `<ROBOT_IP>` can be left out.
 
-`robot.sh` sources the `env.sh` of the GDK, which puts `agibot_gdk` on the Python path, and adds
-this folder. Source it once per shell, from the folder of this repository. `q` ends a script with
-a live table. `Ctrl+C` ends every script. Run one script at a time. The live displays have jog
-keys, so you can move a joint while you watch the values.
+[SETUP.md](SETUP.md) explains the architecture, the difference between cable and Wi-Fi, the
+firewall rule that commands need and the troubleshooting.
 
-The camera exercises serve the images on port 8000 of the PC. Open `http://localhost:8000` in
-the browser of the same PC.
+The robot serves the GDK 3.3.8 reference as a website at `http://<ROBOT_IP>:8849`. The Python
+pages `robot`, `tf` and `camera` describe every call the exercises use.
 
-The same steps work directly on the robot. There the GDK is already installed in
-`/home/agi/app`, and `robot.sh` finds it.
+`q` ends a script with a live table. `Ctrl+C` ends every script. Run one script at a time. The
+live displays have jog keys, so you can move a joint while you watch the values. The camera
+exercises serve their images at `http://localhost:8000`.
 
-## Without the robot
+## On the robot
+
+The exercises also run on the robot itself. The GDK is already installed there.
+
+```bash
+ssh agi@<ROBOT_IP>
+cd <folder of this repository>
+source robot.sh
+python3 exercises/01_joints/joints.py
+```
+
+The camera images are then at `http://<ROBOT_IP>:8000`.
+
+## Without a robot
 
 ```bash
 uv sync
 source fake.sh
-python3 exercises/01_joints/joints.py
+python exercises/01_joints/joints.py
 ```
 
 `fake.sh` points `agibot_gdk` at `fake/agibot_gdk`. It offers the same calls and return shapes
@@ -114,6 +95,10 @@ working before the robot is free.
 | `gdk_training/jog.py` | jog keys for the live displays |
 | `gdk_training/joints.py` | joint names and limits |
 | `fake/agibot_gdk/` | stand-in for the GDK |
+| `scripts/install_gdk.sh` | installs the GDK package for laptops from the robot |
+| `real.sh`, `robot.sh`, `fake.sh` | environment for the laptop with the robot, for the robot itself and for the fake |
+| `gdk_training/doctor.py` | connection check for the laptop setup |
+| `SETUP.md` | architecture and setup of the laptop |
 
 ## License
 

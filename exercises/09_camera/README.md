@@ -24,7 +24,7 @@ them into an array.
 
 ## Try
 
-- Open `http://localhost:8000` in the browser of the PC that runs the script. `Ctrl+C` ends the script.
+- Open `http://localhost:8000` in the browser of the machine that runs the script. `Ctrl+C` ends the script.
 - Hold a hand in front of the head camera and watch the depth stream.
 - Hold a sticky note in front of the left wrist camera and check that it appears in `hand_left`.
 

@@ -136,3 +136,16 @@ def test_prompt_refuses_a_line_without_a_joint_name() -> None:
     result = run("solutions", "04_joint_moves/move.py", [], stdin="0.3\nq\n")
     assert "pairs of a joint name and an angle" in result.stdout
     assert "result 0" not in result.stdout
+
+
+@pytest.mark.parametrize("script", ["real.sh", "robot.sh", "fake.sh", "scripts/install_gdk.sh"])
+def test_shell_script_has_valid_syntax(script: str) -> None:
+    assert subprocess.run(["bash", "-n", str(ROOT / script)], capture_output=True).returncode == 0
+
+
+def test_doctor_stops_with_a_hint_when_the_environment_is_missing() -> None:
+    environment = {key: value for key, value in ENV.items() if key not in ("ROBOT_IP", "GDK_APP")}
+    result = subprocess.run([sys.executable, "-m", "gdk_training.doctor"], env=environment, cwd=ROOT,
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 1
+    assert "[FAIL]" in result.stdout
