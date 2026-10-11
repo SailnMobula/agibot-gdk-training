@@ -3,7 +3,8 @@
     viewer.serve({"head": lambda: grab(camera, agibot_gdk.CameraType.kHeadColor)})
 
 Each stream is a function returning a BGR image (h, w, 3) uint8 or a depth image (h, w) uint16
-in mm, or None when there is no frame yet. Open http://localhost:8000 on the machine that runs
+in mm, or None when there is no frame yet. clicks maps a stream to a function that gets the pixel
+(u, v) of the image where someone clicked in the browser. Open http://localhost:8000 on the machine that runs
 the script, or http://<address>:8000 from another machine.
 """
 
@@ -14,11 +15,15 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import cv2
 import numpy as np
 
+from gdk_training import show
+
 Stream = Callable[[], np.ndarray | None]
+Click = Callable[[float, float], object]
 DEPTH_RANGE_MM = 3000.0
 
 
@@ -48,7 +53,19 @@ def serve(streams: Mapping[str, Stream], port: int = 8000, hz: float = 10.0) -> 
         pass
 
 
-def start(streams: Mapping[str, Stream], port: int = 8000, hz: float = 10.0) -> ThreadingHTTPServer | None:
+CLICK_SCRIPT = """<script>
+for (const img of document.querySelectorAll("img[data-click]")) {
+  img.style.cursor = "crosshair";
+  img.onclick = (e) => {
+    const u = e.offsetX * img.naturalWidth / img.clientWidth, v = e.offsetY * img.naturalHeight / img.clientHeight;
+    fetch(`/click/${img.dataset.click}?u=${u}&v=${v}`);
+  };
+}
+</script>"""
+
+
+def start(streams: Mapping[str, Stream], port: int = 8000, hz: float = 10.0,
+          clicks: Mapping[str, Click] | None = None) -> ThreadingHTTPServer | None:
     """Starts the server in the background and returns. Use it when the terminal shows a table."""
     if os.environ.get("SHOW_ONCE"):
         for name, stream in streams.items():
@@ -56,11 +73,22 @@ def start(streams: Mapping[str, Stream], port: int = 8000, hz: float = 10.0) -> 
             print(f"{name}: {'no frame' if image is None else f'{image.shape} {image.dtype}'}")
         return None
 
-    page = "".join(f"<h3>{name}</h3><img src='/{name}' style='max-width:100%'>" for name in streams)
+    headings = len(streams) > 1  # a single image needs no title
+    clicks = clicks or {}
+    page = "".join(f"{f'<h3>{name}</h3>' if headings else ''}<img src='/{quote(name)}' style='max-width:100%'"
+                   f"{f' data-click={quote(name)!r}' if name in clicks else ''}>" for name in streams)
+    page += CLICK_SCRIPT if clicks else ""
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            name = self.path.strip("/")
+            url = urlsplit(self.path)
+            if url.path.startswith("/click/") and unquote(url.path[7:]) in clicks:
+                query = parse_qs(url.query)
+                clicks[unquote(url.path[7:])](float(query["u"][0]), float(query["v"][0]))
+                self.send_response(204)
+                self.end_headers()
+                return
+            name = unquote(self.path.strip("/"))
             if name not in streams:
                 body = f"<html><body style='font-family:sans-serif'>{page}</body></html>".encode()
                 self.send_response(200)
@@ -88,5 +116,6 @@ def start(streams: Mapping[str, Stream], port: int = 8000, hz: float = 10.0) -> 
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"viewer on port {port}, open http://localhost:{port} on this machine")
+    print(f"viewer on port {port}, open http://localhost:{port} in the browser on this machine")
+    show.LINKS.append(f"http://localhost:{port} (images)")
     return server

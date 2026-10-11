@@ -1,0 +1,90 @@
+{
+ "extrinsics": {
+  "kChassisFrontLidarToBaseLink": {
+   "translation": [
+    0.16424920927388006,
+    0.22403400371651516,
+    0.3139999689644208
+   ],
+   "rotation_xyzw": [
+    -0.0023569023512254234,
+    0.07354453929766903,
+    0.0011390074083010436,
+    0.9972884980851451
+   ]
+  },
+  "kChassisBackLidarToBaseLink": {
+   "translation": [
+    -0.23511151699323132,
+    -0.18390232417051372,
+    0.3175062256632921
+   ],
+   "rotation_xyzw": [
+    -0.0890315921835004,
+    0.0014134812820551946,
+    0.9960233603125785,
+    -0.00297378135974313
+   ]
+  }
+ },
+ "fps": {
+  "kLidarFront": 9.998637199401855,
+  "kLidarBack": 10.001208305358887
+ },
+ "latency": {
+  "kLidarFront": {
+   "avg_latency_ms": 102.0633532,
+   "max_latency_ms": 102.702486,
+   "p9999_latency_ms": 102.702313191,
+   "p999_latency_ms": 102.70075791,
+   "p99_latency_ms": 102.68520509999999
+  },
+  "kLidarBack": {
+   "avg_latency_ms": 101.55966705263157,
+   "max_latency_ms": 102.075518,
+   "p9999_latency_ms": 102.0751478768,
+   "p999_latency_ms": 102.07181676799999,
+   "p99_latency_ms": 102.03850568
+  }
+ },
+ "points": 20064,
+ "point_step": 22,
+ "fields": [
+  {
+   "count": 1,
+   "datatype": 7,
+   "name": "x",
+   "offset": 0
+  },
+  {
+   "count": 1,
+   "datatype": 7,
+   "name": "y",
+   "offset": 4
+  },
+  {
+   "count": 1,
+   "datatype": 7,
+   "name": "z",
+   "offset": 8
+  },
+  {
+   "count": 1,
+   "datatype": 2,
+   "name": "reflectivity",
+   "offset": 12
+  },
+  {
+   "count": 1,
+   "datatype": 2,
+   "name": "tag",
+   "offset": 13
+  },
+  {
+   "count": 1,
+   "datatype": 8,
+   "name": "timestamp",
+   "offset": 14
+  }
+ ]
+}

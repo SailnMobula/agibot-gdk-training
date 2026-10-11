@@ -3,7 +3,8 @@
 It has the same names and return shapes as the real module for the calls the exercises use.
 The behaviour is simplified. A joint moves in a straight ramp to its target. The frame poses
 come from a toy model and do not follow the real kinematics. The head camera shows a grid with
-a cross at the projection of each end effector.
+a cross at the projection of each end effector. Lidar, Slam, Map and Pnc are in _nav.py and work
+on a map recorded on the robot.
 
 FAKE_INSTANT=1 skips the time a blocking move takes.
 """
@@ -69,6 +70,8 @@ class SensorExtrinsicType(Enum):
     kHeadRGBDToHeadLink3 = 2
     kLeftHandRGBDToArmLEndLink = 3
     kRightHandRGBDToArmREndLink = 4
+    kChassisFrontLidarToBaseLink = 5
+    kChassisBackLidarToBaseLink = 6
 
 
 class Vector3:
@@ -414,6 +417,9 @@ class TF:
     def get_tf_from_sensor(self, sensor_extrinsic_type: SensorExtrinsicType) -> Transform:
         if sensor_extrinsic_type == SensorExtrinsicType.kHeadRGBDToHeadLink3:
             return _transform(HEAD_TO_CAMERA)
+        if sensor_extrinsic_type.name in _nav.LIDAR_DATA["extrinsics"]:
+            extrinsic = _nav.LIDAR_DATA["extrinsics"][sensor_extrinsic_type.name]
+            return _transform(geometry.matrix(tuple(extrinsic["translation"]), tuple(extrinsic["rotation_xyzw"])))
         if sensor_extrinsic_type == SensorExtrinsicType.kHeadDepthToHeadColor:
             return _transform(_translation(0.015, 0.0, 0.0))
         return _transform(_translation(0.0, 0.06, 0.05))
@@ -476,3 +482,8 @@ class Camera:
 
     def close_camera(self) -> GDKRes:
         return GDKRes.kSuccess
+
+
+from agibot_gdk import _nav  # noqa: E402  The navigation part needs the classes above.
+from agibot_gdk._nav import (GuidePtInfo, Lidar, LidarType, Map, MapInfo, MapName, NaviReq,  # noqa: E402
+                             OccupancyGrid, PNCTaskState, Pnc, PointCloud, PointField, Slam)
