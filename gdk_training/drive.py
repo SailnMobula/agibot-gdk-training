@@ -26,8 +26,8 @@ LINEAR = 0.2           # m/s per key
 ANGULAR = 0.4          # rad/s per key
 MAX_LINEAR = 0.3
 MAX_ANGULAR = 0.5
-REMOTE_CONTROL = 3     # task type
-ACTIVE = (1, 2, 3, 4, 5, 6)
+CANCELLABLE = (1, 2, 4, 5)   # task states starting, running, paused and resuming: cancel_task ends these
+ACTIVE = (1, 2, 3, 4, 5, 6)  # task states starting to canceling: the planner takes nothing new
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -40,20 +40,20 @@ STOP = Command(vx=0.0, wz=0.0)
 
 
 def take_control(pnc: agibot_gdk.Pnc) -> None:
-    """Cancels a remote control task that is still active and requests the chassis."""
+    """Ends a task that is still in flight, whatever its type, and requests the chassis."""
     task = pnc.get_task_state()
-    if task.type == REMOTE_CONTROL and task.state in ACTIVE:
+    if task.state in CANCELLABLE:
         pnc.cancel_task(task.id)
-        deadline = time.monotonic() + 3.0
-        while pnc.get_task_state().state in ACTIVE and time.monotonic() < deadline:
-            time.sleep(0.1)
+    deadline = time.monotonic() + 3.0
+    while pnc.get_task_state().state in ACTIVE and time.monotonic() < deadline:
+        time.sleep(0.1)
     pnc.request_chassis_control(0)
 
 
 def twist(command: Command) -> agibot_gdk.Twist:
     result = agibot_gdk.Twist()
-    result.linear = agibot_gdk.Vector3(max(-MAX_LINEAR, min(MAX_LINEAR, command.vx)), 0.0, 0.0)
-    result.angular = agibot_gdk.Vector3(0.0, 0.0, max(-MAX_ANGULAR, min(MAX_ANGULAR, command.wz)))
+    result.linear.x = max(-MAX_LINEAR, min(MAX_LINEAR, command.vx))  # Vector3 takes no constructor arguments
+    result.angular.z = max(-MAX_ANGULAR, min(MAX_ANGULAR, command.wz))
     return result
 
 
@@ -62,12 +62,14 @@ def deadman(command: Command, age_s: float, hold_s: float) -> Command:
 
 
 def release(pnc: agibot_gdk.Pnc) -> None:
-    """Stops the chassis and ends the remote control task."""
+    """Stops the chassis and ends the task that holds it."""
     task = pnc.get_task_state()
-    if task.type == REMOTE_CONTROL and task.state in ACTIVE:
-        if task.state == 2:
-            pnc.move_chassis(twist(STOP))
-        pnc.cancel_task(task.id)
+    if task.state in CANCELLABLE:
+        try:
+            if task.state == 2:
+                pnc.move_chassis(twist(STOP))
+        finally:
+            pnc.cancel_task(task.id)
 
 
 class Drive:

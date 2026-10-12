@@ -75,8 +75,16 @@ class SensorExtrinsicType(Enum):
 
 
 class Vector3:
-    def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> None:
-        self.x, self.y, self.z = x, y, z
+    """No constructor arguments, like the binding on the robot: set x, y and z."""
+
+    def __init__(self) -> None:
+        self.x, self.y, self.z = 0.0, 0.0, 0.0
+
+
+def _vector3(x: float = 0.0, y: float = 0.0, z: float = 0.0) -> Vector3:
+    vector = Vector3()
+    vector.x, vector.y, vector.z = float(x), float(y), float(z)
+    return vector
 
 
 class Quaternion:
@@ -148,14 +156,14 @@ class EndEffectorPose:
 
 def _pose(transform: np.ndarray) -> Pose:
     pose = Pose()
-    pose.position = Vector3(*geometry.position(transform))
+    pose.position = _vector3(*geometry.position(transform))
     pose.orientation = Quaternion(*geometry.quaternion(transform))
     return pose
 
 
 def _transform(matrix: np.ndarray) -> Transform:
     transform = Transform()
-    transform.translation = Vector3(*geometry.position(matrix))
+    transform.translation = _vector3(*geometry.position(matrix))
     transform.rotation = Quaternion(*geometry.quaternion(matrix))
     return transform
 
@@ -267,8 +275,8 @@ class Robot:
         for name in FRAMES:
             wrench = Wrench()
             if "arm" in name or "gripper" in name:
-                wrench.force = Vector3(random.gauss(0, 0.2), random.gauss(0, 0.2), -6.0 + random.gauss(0, 0.2))
-                wrench.torque = Vector3(*(random.gauss(0, 0.02) for _ in range(3)))
+                wrench.force = _vector3(random.gauss(0, 0.2), random.gauss(0, 0.2), -6.0 + random.gauss(0, 0.2))
+                wrench.torque = _vector3(*(random.gauss(0, 0.02) for _ in range(3)))
             wrenches.append(wrench)
         return SimpleNamespace(
             mode=1, control_mode=_world.control_mode, error_code=0, error_msg="",

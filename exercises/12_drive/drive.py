@@ -24,8 +24,8 @@ LINEAR = 0.2  # m/s per key
 ANGULAR = 0.4  # rad/s per key
 MAX_LINEAR = 0.3
 MAX_ANGULAR = 0.5
-REMOTE_CONTROL = 3  # task type
-ACTIVE = (1, 2, 3, 4, 5, 6)  # task states starting to canceling
+CANCELLABLE = (1, 2, 4, 5)  # task states starting, running, paused and resuming: cancel_task ends these
+ACTIVE = (1, 2, 3, 4, 5, 6)  # task states starting to canceling: the planner takes nothing new
 TASK_STATES = {0: "idle", 1: "starting", 2: "running", 3: "pausing", 4: "paused", 5: "resuming", 6: "canceling",
                7: "canceled", 8: "fail", 9: "success"}
 TASK_TYPES = {0: "idle", 1: "navigation", 2: "high precision", 3: "remote control", 4: "relative move"}
@@ -41,16 +41,17 @@ STOP = Command(vx=0.0, wz=0.0)
 
 
 def take_control(pnc: agibot_gdk.Pnc) -> None:
-    """Requests the chassis. Cancels a remote control task that is still active first."""
-    # TODO: Read get_task_state. When its type is REMOTE_CONTROL and its state is in ACTIVE, call
-    # cancel_task with its id and wait until the state is no longer active. Then call
+    """Requests the chassis. Ends a task that is still in flight first, whatever its type."""
+    # TODO: Read get_task_state. When its state is in CANCELLABLE, call cancel_task with its id.
+    # Wait until the state is no longer in ACTIVE, 3 s at most. Then call
     # request_chassis_control(0).
     raise NotImplementedError
 
 
 def twist(command: Command) -> agibot_gdk.Twist:
     """Builds the Twist for a command."""
-    # TODO: agibot_gdk.Twist() has linear and angular, both Vector3.
+    # TODO: agibot_gdk.Twist() has linear and angular, both Vector3. Set linear.x and angular.z.
+    # Vector3 takes no constructor arguments.
     raise NotImplementedError
 
 
@@ -67,8 +68,9 @@ def deadman(command: Command, age_s: float, hold_s: float) -> Command:
 
 
 def release(pnc: agibot_gdk.Pnc) -> None:
-    """Stops the chassis and ends the remote control task."""
-    # TODO: Send STOP. Then cancel the remote control task when it is still active.
+    """Stops the chassis and ends the task that holds it."""
+    # TODO: Read get_task_state. When its state is in CANCELLABLE, send STOP if it is running (2)
+    # and call cancel_task with its id, also when the STOP failed.
     raise NotImplementedError
 
 
@@ -81,6 +83,9 @@ class Keys:
 
     def __init__(self, pnc: agibot_gdk.Pnc) -> None:
         self.pnc = pnc
+        # One Pnc request at a time: a second one while the first is in flight breaks the first
+        # ("Broken promise"). The sender thread and the table both ask.
+        self.lock = threading.Lock()
         self.command, self.stamp, self.sent, self.error = STOP, 0.0, STOP, ""
         self.running = True
         self.thread = threading.Thread(target=self.loop, daemon=True)
@@ -94,7 +99,8 @@ class Keys:
         while self.running:
             command = limit(deadman(self.command, time.monotonic() - self.stamp, HOLD_S))
             try:
-                send(self.pnc, command)
+                with self.lock:
+                    send(self.pnc, command)
                 self.sent, self.error = command, ""
             except RuntimeError as error:
                 self.error = str(error)
@@ -105,11 +111,11 @@ def main() -> None:
     if agibot_gdk.gdk_init() != agibot_gdk.GDKRes.kSuccess:
         sys.exit("gdk_init failed")
     pnc = agibot_gdk.Pnc()
-    time.sleep(2.0)
     keys = Keys(pnc)
 
     def read() -> dict:
-        task = pnc.get_task_state()
+        with keys.lock:
+            task = pnc.get_task_state()
         age = f"{time.monotonic() - keys.stamp:.1f}" if keys.stamp else "no key yet"
         return {"key": {"vx": keys.command.vx, "wz": keys.command.wz, "age s": age},
                 "sent": {"vx": keys.sent.vx, "wz": keys.sent.wz, "error": keys.error or "-"},
@@ -119,6 +125,7 @@ def main() -> None:
     bindings = {"w": Command(vx=LINEAR, wz=0.0), "s": Command(vx=-LINEAR, wz=0.0),
                 "a": Command(vx=0.0, wz=ANGULAR), "d": Command(vx=0.0, wz=-ANGULAR), " ": STOP}
     try:
+        time.sleep(2.0)
         take_control(pnc)
         keys.thread.start()
         show.live(read, hz=5.0, keys={key: (lambda c=c: keys.press(c)) for key, c in bindings.items()},
@@ -127,8 +134,10 @@ def main() -> None:
         keys.running = False
         if keys.thread.is_alive():
             keys.thread.join()
-        release(pnc)
-        agibot_gdk.gdk_release()
+        try:
+            release(pnc)
+        finally:  # the GDK is released also when the chassis could not be given back
+            agibot_gdk.gdk_release()
 
 
 if __name__ == "__main__":

@@ -490,7 +490,7 @@ world = NavWorld()
 
 def _pose_xy_yaw(x: float, y: float, yaw: float) -> _gdk.Pose:
     pose = _gdk.Pose()
-    pose.position = _gdk.Vector3(x, y, 0.0)
+    pose.position = _gdk._vector3(x, y, 0.0)
     pose.orientation = _gdk.Quaternion(0.0, 0.0, math.sin(yaw / 2), math.cos(yaw / 2))
     return pose
 
@@ -578,7 +578,7 @@ class Map:
             data = world.maps[map_id]
         info = MapInfo()
         info.id = data.id
-        info.gravity = _gdk.Vector3(*data.gravity)
+        info.gravity = _gdk._vector3(*data.gravity)
         grid = info.grid_map
         grid.height, grid.width = data.grid.shape
         grid.resolution = data.resolution
@@ -587,7 +587,7 @@ class Map:
         for point in data.guide_pts:
             guide = GuidePtInfo()
             guide.id, guide.type = point["id"], point["type"]
-            guide.pt.position = _gdk.Vector3(**point["position"])
+            guide.pt.position = _gdk._vector3(**point["position"])
             guide.pt.orientation = _gdk.Quaternion(**point["orientation"])
             info.guide_pts.append(guide)
         info.nonground_cloud = PointCloud(data.cloud, data.cloud_fields, data.cloud_step, is_dense=True)

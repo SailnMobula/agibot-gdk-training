@@ -6,11 +6,11 @@ and stops the robot when no key is pressed.
 
 ## Write
 
-- `take_control` cancels a remote control task that is still running and calls `request_chassis_control(0)`.
+- `take_control` cancels a task that is still in flight, waits until it has ended and calls `request_chassis_control(0)`.
 - `twist` builds a `Twist` from a `Command`.
 - `send` passes the twist to `move_chassis`.
 - `deadman` returns the command while the key is fresh and `STOP` after `hold_s`.
-- `release` stops the robot and cancels the remote control task.
+- `release` stops the robot and cancels the task that holds the chassis.
 
 ## Returns
 
@@ -18,7 +18,8 @@ and stops the robot when no key is pressed.
 
 `agibot_gdk.Twist()` has `linear` and `angular`, each a `Vector3` with `x`, `y` and `z`.
 `linear.x` is forward in m/s and `angular.z` is the turn rate in rad/s, counter-clockwise
-positive.
+positive. `Vector3` takes no constructor arguments: set the fields of `twist.linear` and
+`twist.angular`.
 
 | Call | Returns |
 | --- | --- |
@@ -29,6 +30,13 @@ positive.
 
 Mode 0 is Ackermann. `type` 3 means remote control. `state` is 0 idle, 1 starting, 2 running,
 3 pausing, 4 paused, 5 resuming, 6 canceling, 7 canceled, 8 fail and 9 success.
+
+`cancel_task` ends a task in state 1, 2, 4 or 5. Do not look at the type before you cancel: the
+planner takes nothing new while any task is in flight, also one of the HMI or of navigation.
+
+Only one `Pnc` call may be under way at a time. A second one from another thread breaks the first
+("Broken promise"). The provided code holds a lock around the sender's `move_chassis` and the
+table's `get_task_state`.
 
 ## Try
 
@@ -56,7 +64,7 @@ cancels the old task first, the table shows a new task id and you can drive.
 
 ## Look for
 
-- `request_chassis_control` fails while a remote control task runs, also your own from the last run.
+- `request_chassis_control` fails while any task is in flight, also your own from the last run.
 - The robot stops on its own about 0.6 s after the last command. A zero command stops it at once.
 - While you hold the chassis, a remote control task runs. Navigation cannot run at the same time.
 - Holding a key repeats it only after a short delay. `hold_s` has to bridge that delay.

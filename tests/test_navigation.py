@@ -122,6 +122,16 @@ def test_take_control_cancels_a_leftover_task_and_release_ends_it(fresh_world: _
     assert pnc.get_task_state().state == 7
 
 
+def test_take_control_ends_a_leftover_task_of_any_type(fresh_world: _nav.NavWorld) -> None:
+    drive = load("12_drive/drive.py")
+    pnc = agibot_gdk.Pnc()
+    leftover = fresh_world.start_task(_nav.TYPE_RELATIVE_MOVE, state=4)  # a paused move of another program
+    drive.take_control(pnc)
+    task = pnc.get_task_state()
+    assert task.id != leftover.id
+    assert (task.type, task.state) == (3, 2)
+
+
 def test_the_chassis_stops_without_commands(fresh_world: _nav.NavWorld) -> None:
     drive = load("12_drive/drive.py")
     pnc = agibot_gdk.Pnc()
