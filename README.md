@@ -109,6 +109,7 @@ the fake to get a function working before the robot is free.
 | `gdk_training/jog.py` | jog keys for the live displays |
 | `gdk_training/joints.py` | joint names and limits |
 | `gdk_training/lidar.py` | point clouds as arrays, the finished code of exercise 11 |
+| `gdk_training/serial.py` | one call at a time to a GDK object, for the threads of the live displays |
 | `gdk_training/drive.py` | drive keys for the live displays, the finished code of exercise 12 |
 | `gdk_training/maps.py` | maps as images and arrays, the finished code of exercises 14 and 15 |
 | `gdk_training/cloud3d.py` | 3D point cloud view in the browser, three.js in `gdk_training/static` |

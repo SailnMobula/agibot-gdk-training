@@ -23,6 +23,7 @@ import cv2
 
 from gdk_training import maps, show
 from gdk_training.drive import Drive
+from gdk_training.serial import serial
 
 NEW_MAP_TIMEOUT_S = 10.0
 
@@ -97,7 +98,8 @@ def quiet() -> Iterator[None]:
 def main() -> None:
     if agibot_gdk.gdk_init() != agibot_gdk.GDKRes.kSuccess:
         sys.exit("gdk_init failed")
-    slam, map_api, pnc = agibot_gdk.Slam(), agibot_gdk.Map(), agibot_gdk.Pnc()
+    # The table and the keys run on different threads and ask the same objects: one call at a time.
+    slam, map_api, pnc = serial(agibot_gdk.Slam()), serial(agibot_gdk.Map()), serial(agibot_gdk.Pnc())
     time.sleep(2.0)
     drive = Drive(pnc)
     workshop_map = map_api.get_curr_map().id

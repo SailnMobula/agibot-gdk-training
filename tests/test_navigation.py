@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import threading
 import time
 
 import numpy as np
@@ -12,6 +13,7 @@ from test_solutions import ENV, ROOT, load, run  # noqa: F401  (also puts the fa
 import agibot_gdk
 from agibot_gdk import _nav
 from gdk_training import geometry, lidar, maps, show
+from gdk_training.serial import serial
 
 FREE_GOAL = (0.10, 0.76)  # guide point 2
 
@@ -143,6 +145,31 @@ def test_the_chassis_stops_without_commands(fresh_world: _nav.NavWorld) -> None:
     time.sleep(0.3)
     pnc.get_task_state()
     assert (fresh_world.x, fresh_world.y) == stopped
+
+
+def test_serial_lets_one_call_at_a_time_through() -> None:
+    class Api:
+        value = 7
+
+        def __init__(self) -> None:
+            self.inside, self.overlaps = 0, 0
+
+        def call(self, wait_s: float) -> float:
+            self.inside += 1
+            self.overlaps += self.inside > 1
+            time.sleep(wait_s)
+            self.inside -= 1
+            return wait_s
+
+    api = Api()
+    wrapped = serial(api)
+    threads = [threading.Thread(target=lambda: [wrapped.call(0.002) for _ in range(20)]) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert api.overlaps == 0
+    assert wrapped.call(0.0) == 0.0 and wrapped.value == 7
 
 
 # --- 13 mapping -----------------------------------------------------------------------------
