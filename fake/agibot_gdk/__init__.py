@@ -3,7 +3,8 @@
 It has the same names and return shapes as the real module for the calls the exercises use.
 The behaviour is simplified. A joint moves in a straight ramp to its target. The frame poses
 come from a toy model and do not follow the real kinematics. The head camera shows a grid with
-a cross at the projection of each end effector.
+a cross at the projection of each end effector. Lidar, Slam, Map and Pnc are in _nav.py and work
+on a map recorded on the robot.
 
 FAKE_INSTANT=1 skips the time a blocking move takes.
 """
@@ -69,11 +70,21 @@ class SensorExtrinsicType(Enum):
     kHeadRGBDToHeadLink3 = 2
     kLeftHandRGBDToArmLEndLink = 3
     kRightHandRGBDToArmREndLink = 4
+    kChassisFrontLidarToBaseLink = 5
+    kChassisBackLidarToBaseLink = 6
 
 
 class Vector3:
-    def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> None:
-        self.x, self.y, self.z = x, y, z
+    """No constructor arguments, like the binding on the robot: set x, y and z."""
+
+    def __init__(self) -> None:
+        self.x, self.y, self.z = 0.0, 0.0, 0.0
+
+
+def _vector3(x: float = 0.0, y: float = 0.0, z: float = 0.0) -> Vector3:
+    vector = Vector3()
+    vector.x, vector.y, vector.z = float(x), float(y), float(z)
+    return vector
 
 
 class Quaternion:
@@ -145,14 +156,14 @@ class EndEffectorPose:
 
 def _pose(transform: np.ndarray) -> Pose:
     pose = Pose()
-    pose.position = Vector3(*geometry.position(transform))
+    pose.position = _vector3(*geometry.position(transform))
     pose.orientation = Quaternion(*geometry.quaternion(transform))
     return pose
 
 
 def _transform(matrix: np.ndarray) -> Transform:
     transform = Transform()
-    transform.translation = Vector3(*geometry.position(matrix))
+    transform.translation = _vector3(*geometry.position(matrix))
     transform.rotation = Quaternion(*geometry.quaternion(matrix))
     return transform
 
@@ -264,8 +275,8 @@ class Robot:
         for name in FRAMES:
             wrench = Wrench()
             if "arm" in name or "gripper" in name:
-                wrench.force = Vector3(random.gauss(0, 0.2), random.gauss(0, 0.2), -6.0 + random.gauss(0, 0.2))
-                wrench.torque = Vector3(*(random.gauss(0, 0.02) for _ in range(3)))
+                wrench.force = _vector3(random.gauss(0, 0.2), random.gauss(0, 0.2), -6.0 + random.gauss(0, 0.2))
+                wrench.torque = _vector3(*(random.gauss(0, 0.02) for _ in range(3)))
             wrenches.append(wrench)
         return SimpleNamespace(
             mode=1, control_mode=_world.control_mode, error_code=0, error_msg="",
@@ -414,6 +425,9 @@ class TF:
     def get_tf_from_sensor(self, sensor_extrinsic_type: SensorExtrinsicType) -> Transform:
         if sensor_extrinsic_type == SensorExtrinsicType.kHeadRGBDToHeadLink3:
             return _transform(HEAD_TO_CAMERA)
+        if sensor_extrinsic_type.name in _nav.LIDAR_DATA["extrinsics"]:
+            extrinsic = _nav.LIDAR_DATA["extrinsics"][sensor_extrinsic_type.name]
+            return _transform(geometry.matrix(tuple(extrinsic["translation"]), tuple(extrinsic["rotation_xyzw"])))
         if sensor_extrinsic_type == SensorExtrinsicType.kHeadDepthToHeadColor:
             return _transform(_translation(0.015, 0.0, 0.0))
         return _transform(_translation(0.0, 0.06, 0.05))
@@ -476,3 +490,8 @@ class Camera:
 
     def close_camera(self) -> GDKRes:
         return GDKRes.kSuccess
+
+
+from agibot_gdk import _nav  # noqa: E402  The navigation part needs the classes above.
+from agibot_gdk._nav import (GuidePtInfo, Lidar, LidarType, Map, MapInfo, MapName, NaviReq,  # noqa: E402
+                             OccupancyGrid, PNCTaskState, Pnc, PointCloud, PointField, Slam)

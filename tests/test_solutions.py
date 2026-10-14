@@ -31,6 +31,12 @@ RUNS = [
     ("08_tf/frames.py", [], "get_tf_from_base_link"),
     ("09_camera/camera.py", [], "head_depth: (400, 640) uint16"),
     ("10_camera_tf/project.py", [], "in camera"),
+    ("11_lidar/lidar.py", [], "x <f4@0"),
+    ("12_drive/drive.py", [], "remote control"),
+    ("13_mapping/mapping.py", [], "workshop map"),
+    ("14_map2d/map2d.py", [], "guide points"),
+    ("15_map3d/map3d.py", [], "robot found"),
+    ("16_navigate/navigate.py", [], "click on the map"),
 ]
 
 

@@ -15,7 +15,7 @@ from gdk_training import geometry, show
 from gdk_training.jog import Jog
 
 FRAMES = ["head_link3", "arm_l_end_link", "arm_r_end_link"]
-TOOL = ("arm_l_end_link", "gripper_l_center_link")
+TOOL = ("arm_l_end_link", "gripper_l_center_link")  # target and source of the tool lookup
 
 
 def frame_names(tf: agibot_gdk.TF) -> list[str]:
@@ -49,7 +49,11 @@ def from_base(tf: agibot_gdk.TF, frame: str) -> geometry.Matrix:
 def status_poses(robot: agibot_gdk.Robot) -> dict[str, geometry.Matrix]:
     """Returns the pose of every frame of the motion control status in base_link, by frame name."""
     status = robot.get_motion_control_status()
-    return {name: geometry.from_pose(pose) for name, pose in zip(status.frame_names, status.frame_poses)}
+    poses: dict[str, geometry.Matrix] = {}
+    # frame_names and frame_poses have the same order.
+    for index, name in enumerate(status.frame_names):
+        poses[name] = geometry.from_pose(status.frame_poses[index])
+    return poses
 
 
 def compare(robot: agibot_gdk.Robot, tf: agibot_gdk.TF, frames: list[str]) -> list[dict[str, object]]:
@@ -57,39 +61,53 @@ def compare(robot: agibot_gdk.Robot, tf: agibot_gdk.TF, frames: list[str]) -> li
     reference = status_poses(robot)
     rows = []
     for frame in frames:
-        found = lookup(tf, "base_link", frame)
-        rows.append({
+        if frame in reference:
+            status_position = geometry.position(reference[frame])
+        else:
+            status_position = "-"  # the motion control status does not know every frame
+        looked_up = lookup(tf, "base_link", frame)
+        row = {
             "frame": frame,
-            "status": geometry.position(reference[frame]) if frame in reference else "-",
-            "lookup(base_link, frame)": geometry.position(found),
-            "inverse of it": geometry.position(geometry.inverse(found)),
+            "status": status_position,
+            "lookup(base_link, frame)": geometry.position(looked_up),
+            "inverse of it": geometry.position(geometry.inverse(looked_up)),
             "get_tf_from_base_link": geometry.position(from_base(tf, frame)),
-        })
+        }
+        rows.append(row)
     return rows
 
 
 def tool_offset(tf: agibot_gdk.TF) -> dict[str, tuple[float, float, float]]:
     """Returns position and orientation of the lookup between the two TOOL frames."""
-    offset = lookup(tf, *TOOL)
+    target, source = TOOL
+    offset = lookup(tf, target, source)
     return {"position": geometry.position(offset), "roll pitch yaw": geometry.rpy(offset)}
 
 
 def main() -> None:
     if agibot_gdk.gdk_init() != agibot_gdk.GDKRes.kSuccess:
         sys.exit("gdk_init failed")
-    robot, tf = agibot_gdk.Robot(), agibot_gdk.TF()
+    robot = agibot_gdk.Robot()
+    tf = agibot_gdk.TF()
     time.sleep(2.0)
     try:
         names = frame_names(tf)
         if "--all" in sys.argv:
             print("\n".join(names))
             return
+
+        # Not every robot has every frame. Show only those the TF tree knows.
         frames = [frame for frame in FRAMES if frame in names]
-        sections = {"frame positions in base_link": lambda: compare(robot, tf, frames)}
-        if all(frame in names for frame in TOOL):
-            sections[f"lookup{TOOL}"] = lambda: tool_offset(tf)
+        has_tool_frames = TOOL[0] in names and TOOL[1] in names
+
+        def read_table() -> dict[str, object]:
+            table: dict[str, object] = {"frame positions in base_link": compare(robot, tf, frames)}
+            if has_tool_frames:
+                table[f"lookup{TOOL}"] = tool_offset(tf)
+            return table
+
         jog = Jog(robot)
-        show.live(lambda: {title: read() for title, read in sections.items()}, keys=jog.keys, help=jog.help)
+        show.live(read_table, keys=jog.keys, help=jog.help)
     finally:
         agibot_gdk.gdk_release()
 

@@ -13,7 +13,9 @@ import agibot_gdk
 
 from gdk_training import show
 
-OPEN, CLOSED = -0.785, 0.0
+OPEN = -0.785  # rad
+CLOSED = 0.0  # rad
+HALF_OPEN = OPEN / 2
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -50,9 +52,11 @@ def command(robot: agibot_gdk.Robot, left: float, right: float) -> int:
 
 def close_one(robot: agibot_gdk.Robot, side: str) -> int:
     """Closes one gripper and commands the other one to its measured position."""
-    measured = {gripper.side: gripper.position for gripper in read_gripper(robot)}
-    measured[side] = CLOSED
-    return command(robot, measured["left"], measured["right"])
+    positions: dict[str, float] = {}
+    for gripper in read_gripper(robot):
+        positions[gripper.side] = gripper.position
+    positions[side] = CLOSED
+    return command(robot, positions["left"], positions["right"])
 
 
 def main() -> None:
@@ -60,19 +64,34 @@ def main() -> None:
         sys.exit("gdk_init failed")
     robot = agibot_gdk.Robot()
     time.sleep(2.0)
+
+    def read_table() -> list[Gripper]:
+        return read_gripper(robot)
+
+    def open_both() -> int:
+        return command(robot, OPEN, OPEN)
+
+    def close_both() -> int:
+        return command(robot, CLOSED, CLOSED)
+
+    def half_open_both() -> int:
+        return command(robot, HALF_OPEN, HALF_OPEN)
+
+    def close_left() -> int:
+        return close_one(robot, "left")
+
+    def close_right() -> int:
+        return close_one(robot, "right")
+
+    keys = {
+        "o": open_both,
+        "c": close_both,
+        "h": half_open_both,
+        "l": close_left,
+        "r": close_right,
+    }
     try:
-        show.live(
-            lambda: read_gripper(robot),
-            keys={
-                "o": lambda: command(robot, OPEN, OPEN),
-                "c": lambda: command(robot, CLOSED, CLOSED),
-                "h": lambda: command(robot, OPEN / 2, OPEN / 2),
-                "l": lambda: close_one(robot, "left"),
-                "r": lambda: close_one(robot, "right"),
-            },
-            help="o open   c close   h half   l close left   r close right",
-            hz=10.0,
-        )
+        show.live(read_table, keys=keys, help="o open   c close   h half   l close left   r close right", hz=10.0)
     finally:
         agibot_gdk.gdk_release()
 

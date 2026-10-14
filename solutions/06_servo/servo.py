@@ -20,11 +20,16 @@ AMPLITUDE = 0.15  # rad
 FREQUENCY = 0.25  # Hz
 PERIODS = 2
 HOLD_S = 0.5
+PRINT_EVERY = 6  # ticks between two printed lines, 5 lines per second
+DEFAULT_JOINT = "idx27_arm_l_joint7"
 
 
 def measure(robot: agibot_gdk.Robot, joint: str) -> float:
     """Returns the measured position of one joint in rad."""
-    return next(state["motor_position"] for state in robot.get_joint_states()["states"] if state["name"] == joint)
+    for state in robot.get_joint_states()["states"]:
+        if state["name"] == joint:
+            return state["motor_position"]
+    raise KeyError(f"the robot reports no joint {joint}")
 
 
 def setpoint(start: float, t: float) -> float:
@@ -38,7 +43,8 @@ def setpoint(start: float, t: float) -> float:
         A sine around start with AMPLITUDE and FREQUENCY, in rad. At t = 0 it equals start.
     """
     # TODO: Return start plus the sine.
-    return start + AMPLITUDE * math.sin(2 * math.pi * FREQUENCY * t)
+    offset = AMPLITUDE * math.sin(2 * math.pi * FREQUENCY * t)
+    return start + offset
 
 
 def send(robot: agibot_gdk.Robot, joint: str, position: float) -> int:
@@ -57,32 +63,46 @@ def send(robot: agibot_gdk.Robot, joint: str, position: float) -> int:
 
 
 def main() -> None:
-    joint = sys.argv[1] if len(sys.argv) > 1 else "idx27_arm_l_joint7"
+    if len(sys.argv) > 1:
+        joint = sys.argv[1]
+    else:
+        joint = DEFAULT_JOINT
     if agibot_gdk.gdk_init() != agibot_gdk.GDKRes.kSuccess:
         sys.exit("gdk_init failed")
     robot = agibot_gdk.Robot()
     time.sleep(2.0)
     try:
         start = measure(robot, joint)
+
+        # The sine must stay inside the joint limits, also at its lowest and highest point.
         low, high = LIMITS[joint]
-        if not (low < start - AMPLITUDE and start + AMPLITUDE < high):
+        lowest_target = start - AMPLITUDE
+        highest_target = start + AMPLITUDE
+        if lowest_target <= low or highest_target >= high:
             sys.exit(f"The sine around {start:+.3f} rad would leave the limits {low} to {high} of {joint}.")
-        ticks = int(PERIODS / FREQUENCY * RATE_HZ)
+
+        duration_s = PERIODS / FREQUENCY
+        ticks = int(duration_s * RATE_HZ)
         rate = show.Rate(RATE_HZ)
-        worst = 0.0
+        largest_error = 0.0
         for tick in range(ticks + 1):
-            target = setpoint(start, tick / RATE_HZ)
+            t = tick / RATE_HZ
+            target = setpoint(start, t)
             if send(robot, joint, target) != 0:
                 raise RuntimeError("joint_servo_control did not return 0")
             error = target - measure(robot, joint)
-            worst = max(worst, abs(error))
-            if tick % 6 == 0:
-                print(f"t {tick / RATE_HZ:5.2f}  target {target:+.3f}  error {error:+.4f}")
+            largest_error = max(largest_error, abs(error))
+            if tick % PRINT_EVERY == 0:
+                print(f"t {t:5.2f}  target {target:+.3f}  error {error:+.4f}")
             rate.sleep()
-        for _ in range(int(HOLD_S * RATE_HZ)):
+
+        # Keep sending the start position for a moment, so that the joint settles there.
+        hold_ticks = int(HOLD_S * RATE_HZ)
+        for _ in range(hold_ticks):
             send(robot, joint, start)
             rate.sleep()
-        print(f"largest error {worst:.4f} rad, back at {measure(robot, joint):+.3f} from {start:+.3f}")
+        end = measure(robot, joint)
+        print(f"largest error {largest_error:.4f} rad, back at {end:+.3f} from {start:+.3f}")
     finally:
         agibot_gdk.gdk_release()
 

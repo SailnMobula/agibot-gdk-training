@@ -42,9 +42,10 @@ def info(camera: agibot_gdk.Camera, camera_type: agibot_gdk.CameraType) -> Camer
     # TODO: Call get_image_shape, get_image_fps and get_camera_intrinsic. The attribute
     # intrinsic of the last result is the list [fx, fy, cx, cy].
     width, height = camera.get_image_shape(camera_type)
-    fx, fy, cx, cy = camera.get_camera_intrinsic(camera_type).intrinsic
-    return CameraInfo(width=width, height=height, fps=camera.get_image_fps(camera_type),
-                      fx=fx, fy=fy, cx=cx, cy=cy)
+    fps = camera.get_image_fps(camera_type)
+    intrinsic = camera.get_camera_intrinsic(camera_type)
+    fx, fy, cx, cy = intrinsic.intrinsic
+    return CameraInfo(width=width, height=height, fps=fps, fx=fx, fy=fy, cx=cx, cy=cy)
 
 
 def grab(camera: agibot_gdk.Camera, camera_type: agibot_gdk.CameraType) -> np.ndarray | None:
@@ -61,14 +62,34 @@ def grab(camera: agibot_gdk.Camera, camera_type: agibot_gdk.CameraType) -> np.nd
     image = camera.get_latest_image(camera_type, TIMEOUT_MS)
     if image is None or len(image.data) == 0:
         return None
+
+    # JPEG or PNG: OpenCV decodes the bytes and returns BGR.
     if image.encoding != agibot_gdk.Encoding.UNCOMPRESSED:
-        return cv2.imdecode(np.frombuffer(image.data, np.uint8), cv2.IMREAD_COLOR)
+        compressed_bytes = np.frombuffer(image.data, np.uint8)
+        return cv2.imdecode(compressed_bytes, cv2.IMREAD_COLOR)
+
+    # Depth: one 16 bit value per pixel.
     if image.color_format == agibot_gdk.ColorFormat.RS2_FORMAT_Z16:
-        return np.frombuffer(image.data, np.uint16).reshape(image.height, image.width)
-    pixels = np.frombuffer(image.data, np.uint8).reshape(image.height, image.width, 3)
+        depth_values = np.frombuffer(image.data, np.uint16)
+        return depth_values.reshape(image.height, image.width)
+
+    # Colour: three bytes per pixel.
+    colour_bytes = np.frombuffer(image.data, np.uint8)
+    pixels = colour_bytes.reshape(image.height, image.width, 3)
     if image.color_format == agibot_gdk.ColorFormat.RGB:
-        pixels = cv2.cvtColor(pixels, cv2.COLOR_RGB2BGR)
+        pixels = cv2.cvtColor(pixels, cv2.COLOR_RGB2BGR)  # OpenCV and the viewer expect BGR
     return pixels
+
+
+class ImageSource:
+    """Hands the latest image of one camera to the viewer."""
+
+    def __init__(self, camera: agibot_gdk.Camera, camera_type: agibot_gdk.CameraType) -> None:
+        self.camera = camera
+        self.camera_type = camera_type
+
+    def read(self) -> np.ndarray | None:
+        return grab(self.camera, self.camera_type)
 
 
 def main() -> None:
@@ -77,9 +98,18 @@ def main() -> None:
     camera = agibot_gdk.Camera(list(CAMERAS.values()))
     time.sleep(3.0)
     try:
-        print(show.table([{"camera": name, **asdict(info(camera, camera_type))} for name, camera_type in CAMERAS.items()]))
-        viewer.serve({name: (lambda camera_type=camera_type: grab(camera, camera_type))
-                      for name, camera_type in CAMERAS.items()})
+        rows = []
+        for name, camera_type in CAMERAS.items():
+            row = {"camera": name}
+            row.update(asdict(info(camera, camera_type)))
+            rows.append(row)
+        print(show.table(rows))
+
+        streams = {}
+        for name, camera_type in CAMERAS.items():
+            source = ImageSource(camera, camera_type)
+            streams[name] = source.read
+        viewer.serve(streams)
     finally:
         camera.close_camera()
         agibot_gdk.gdk_release()

@@ -22,6 +22,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 Rows = Sequence[Mapping[str, object]]
 Data = Rows | Mapping[str, object] | object  # dataclass instances are drawn like dicts
+LINKS: list[str] = []  # browser pages of viewer and cloud3d, shown below the table
 
 
 def cell(value: object) -> str:
@@ -73,9 +74,17 @@ def render(data: Data) -> str:
     return table(data)
 
 
-def live(read: Callable[[], Data], hz: float = 5.0, keys: Mapping[str, Callable[[], object]] | None = None,
+@dataclasses.dataclass(frozen=True)
+class Line:
+    """A key that first asks for a line of text, e.g. a map id, and passes it to function."""
+
+    prompt: str
+    function: Callable[[str], object]
+
+
+def live(read: Callable[[], Data], hz: float = 5.0, keys: Mapping[str, Callable[[], object] | Line] | None = None,
          help: str | Callable[[], str] = "") -> None:
-    """Calls read() at hz and redraws the result. keys maps a single key to a function.
+    """Calls read() at hz and redraws the result. keys maps a single key to a function or a Line.
 
     A key's function runs on its own thread, so the table keeps redrawing while a blocking GDK
     call is under way. Only one function runs at a time. Keys pressed during that time are ignored.
@@ -89,10 +98,19 @@ def live(read: Callable[[], Data], hz: float = 5.0, keys: Mapping[str, Callable[
     message = ""
     worker: threading.Thread | None = None
 
-    def call(key: str) -> None:
+    def ask(prompt: str) -> str:
+        """Reads one line in the normal terminal mode. The table stops redrawing meanwhile."""
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        try:
+            print(f"\n{prompt} ", end="", flush=True)
+            return os.read(fd, 1024).decode(errors="ignore").strip()
+        finally:
+            tty.setcbreak(fd)
+
+    def call(key: str, function: Callable[[], object]) -> None:
         nonlocal message
         try:
-            result = keys[key]()
+            result = function()
             message = f"{key}: {result if result is not None else 'done'}"
         except Exception as error:  # Show the GDK error below the table and keep the loop running.
             message = f"{key}: {type(error).__name__}: {error}"
@@ -102,7 +120,8 @@ def live(read: Callable[[], Data], hz: float = 5.0, keys: Mapping[str, Callable[
         print("\033[2J", end="")
         while True:
             footer = f"{help() if callable(help) else help}   q quit".strip()
-            print(f"\033[H\033[J{render(read())}\n\n{footer}\n{message}", flush=True)
+            pages = "".join(f"open in the browser: {link}\n" for link in LINKS)
+            print(f"\033[H\033[J{render(read())}\n\n{pages}{footer}\n{message}", flush=True)
             ready, _, _ = select.select([sys.stdin], [], [], 1.0 / hz)
             if not ready:
                 continue
@@ -110,8 +129,14 @@ def live(read: Callable[[], Data], hz: float = 5.0, keys: Mapping[str, Callable[
             if key == "q":
                 return
             if key in keys and not (worker and worker.is_alive()):
+                action = keys[key]
+                if isinstance(action, Line):
+                    text = ask(action.prompt)
+                    function = lambda action=action, text=text: action.function(text)  # noqa: E731
+                else:
+                    function = action
                 message = f"{key}: running"
-                worker = threading.Thread(target=call, args=(key,), daemon=True)
+                worker = threading.Thread(target=call, args=(key, function), daemon=True)
                 worker.start()
     except KeyboardInterrupt:
         pass

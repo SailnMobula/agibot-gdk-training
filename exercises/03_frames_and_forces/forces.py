@@ -57,10 +57,17 @@ def main() -> None:
         sys.exit("gdk_init failed")
     robot = agibot_gdk.Robot()
     time.sleep(2.0)
+
+    def read_table() -> dict[str, object]:
+        table = {
+            "frames in base_link": frames(robot),
+            "external joint torque": disturbance(robot),
+        }
+        return table
+
     try:
         jog = Jog(robot, "idx27_arm_l_joint7")
-        show.live(lambda: {"frames in base_link": frames(robot), "external joint torque": disturbance(robot)},
-                  keys=jog.keys, help=jog.help)
+        show.live(read_table, keys=jog.keys, help=jog.help)
     finally:
         agibot_gdk.gdk_release()
 

@@ -5,3 +5,5 @@ __pycache__/
 .DS_Store
 poses.json
 tools/
+map_*.png
+.idea/

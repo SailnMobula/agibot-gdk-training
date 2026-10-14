@@ -35,8 +35,13 @@ def control_state(robot: agibot_gdk.Robot) -> ControlState:
     """Reads the state of the motion control."""
     # TODO: Call get_motion_control_status and copy the four attributes into a ControlState.
     status = robot.get_motion_control_status()
-    return ControlState(mode=status.mode, control_mode=status.control_mode, error_code=status.error_code,
-                        error_msg=status.error_msg)
+    state = ControlState(
+        mode=status.mode,
+        control_mode=status.control_mode,
+        error_code=status.error_code,
+        error_msg=status.error_msg,
+    )
+    return state
 
 
 def body_state(robot: agibot_gdk.Robot) -> dict[str, object]:
@@ -46,7 +51,7 @@ def body_state(robot: agibot_gdk.Robot) -> dict[str, object]:
         The dict of get_whole_body_status without its "timestamp" entry.
     """
     # TODO: Call get_whole_body_status and remove the timestamp.
-    status = dict(robot.get_whole_body_status())
+    status = dict(robot.get_whole_body_status())  # a copy, so that pop does not change the GDK result
     status.pop("timestamp", None)
     return status
 
@@ -55,11 +60,17 @@ def batteries(robot: agibot_gdk.Robot) -> list[Battery]:
     """Reads the state of every battery in the chassis."""
     # TODO: Call get_chassis_power_state and build one Battery per entry of battery_states.
     power = robot.get_chassis_power_state()
-    return [
-        Battery(index=index, soc=battery.battery_soc, voltage=battery.battery_output_voltage,
-                current=battery.battery_output_current, temperature=battery.battery_temperature)
-        for index, battery in enumerate(power.battery_states)
-    ]
+    result = []
+    for index, battery_state in enumerate(power.battery_states):
+        battery = Battery(
+            index=index,
+            soc=battery_state.battery_soc,
+            voltage=battery_state.battery_output_voltage,
+            current=battery_state.battery_output_current,
+            temperature=battery_state.battery_temperature,
+        )
+        result.append(battery)
+    return result
 
 
 def main() -> None:
@@ -67,9 +78,17 @@ def main() -> None:
         sys.exit("gdk_init failed")
     robot = agibot_gdk.Robot()
     time.sleep(2.0)
+
+    def read_table() -> dict[str, object]:
+        table = {
+            "motion control": control_state(robot),
+            "body": body_state(robot),
+            "batteries": batteries(robot),
+        }
+        return table
+
     try:
-        show.live(lambda: {"motion control": control_state(robot), "body": body_state(robot),
-                           "batteries": batteries(robot)}, hz=2.0)
+        show.live(read_table, hz=2.0)
     finally:
         agibot_gdk.gdk_release()
 
