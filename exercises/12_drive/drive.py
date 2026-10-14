@@ -24,10 +24,38 @@ LINEAR = 0.2  # m/s per key
 ANGULAR = 0.4  # rad/s per key
 MAX_LINEAR = 0.3
 MAX_ANGULAR = 0.5
-CANCELLABLE = (1, 2, 4, 5)  # task states starting, running, paused and resuming: cancel_task ends these
-ACTIVE = (1, 2, 3, 4, 5, 6)  # task states starting to canceling: the planner takes nothing new
-TASK_STATES = {0: "idle", 1: "starting", 2: "running", 3: "pausing", 4: "paused", 5: "resuming", 6: "canceling",
-               7: "canceled", 8: "fail", 9: "success"}
+TAKE_CONTROL_TIMEOUT_S = 3.0  # how long take_control waits for a canceled task to end
+POLL_S = 0.1
+
+# The task states of get_task_state.
+TASK_IDLE = 0
+TASK_STARTING = 1
+TASK_RUNNING = 2
+TASK_PAUSING = 3
+TASK_PAUSED = 4
+TASK_RESUMING = 5
+TASK_CANCELING = 6
+TASK_CANCELED = 7
+TASK_FAIL = 8
+TASK_SUCCESS = 9
+
+# cancel_task ends a task in one of these states.
+CANCELLABLE = (TASK_STARTING, TASK_RUNNING, TASK_PAUSED, TASK_RESUMING)
+# While a task is in one of these states, the planner takes nothing new.
+ACTIVE = (TASK_STARTING, TASK_RUNNING, TASK_PAUSING, TASK_PAUSED, TASK_RESUMING, TASK_CANCELING)
+
+TASK_STATES = {
+    TASK_IDLE: "idle",
+    TASK_STARTING: "starting",
+    TASK_RUNNING: "running",
+    TASK_PAUSING: "pausing",
+    TASK_PAUSED: "paused",
+    TASK_RESUMING: "resuming",
+    TASK_CANCELING: "canceling",
+    TASK_CANCELED: "canceled",
+    TASK_FAIL: "fail",
+    TASK_SUCCESS: "success",
+}
 TASK_TYPES = {0: "idle", 1: "navigation", 2: "high precision", 3: "remote control", 4: "relative move"}
 
 
@@ -69,71 +97,119 @@ def deadman(command: Command, age_s: float, hold_s: float) -> Command:
 
 def release(pnc: agibot_gdk.Pnc) -> None:
     """Stops the chassis and ends the task that holds it."""
-    # TODO: Read get_task_state. When its state is in CANCELLABLE, send STOP if it is running (2)
+    # TODO: Read get_task_state. When its state is in CANCELLABLE, send STOP if it is TASK_RUNNING
     # and call cancel_task with its id, also when the STOP failed.
     raise NotImplementedError
 
 
+def clamp(value: float, low: float, high: float) -> float:
+    """Returns value, but at least low and at most high."""
+    return max(low, min(high, value))
+
+
 def limit(command: Command) -> Command:
-    return Command(vx=max(-MAX_LINEAR, min(MAX_LINEAR, command.vx)), wz=max(-MAX_ANGULAR, min(MAX_ANGULAR, command.wz)))
+    """Keeps a command within MAX_LINEAR and MAX_ANGULAR."""
+    vx = clamp(command.vx, -MAX_LINEAR, MAX_LINEAR)
+    wz = clamp(command.wz, -MAX_ANGULAR, MAX_ANGULAR)
+    return Command(vx=vx, wz=wz)
 
 
-class Keys:
-    """The last key, the sender thread and what it sent."""
+class DriveSession:
+    """The last key, the sender thread and what it sent.
+
+    The sender thread sends a command every 1 / HZ s. The keys only change self.command.
+    """
 
     def __init__(self, pnc: agibot_gdk.Pnc) -> None:
         self.pnc = pnc
         # One Pnc request at a time: a second one while the first is in flight breaks the first
         # ("Broken promise"). The sender thread and the table both ask.
         self.lock = threading.Lock()
-        self.command, self.stamp, self.sent, self.error = STOP, 0.0, STOP, ""
+        self.command = STOP  # the command of the last key
+        self.pressed_at = 0.0  # time.monotonic() of the last key, 0 before the first key
+        self.sent = STOP  # the command the sender thread sent last
+        self.error = ""  # the error of the last send, "" when it worked
         self.running = True
-        self.thread = threading.Thread(target=self.loop, daemon=True)
+        self.thread = threading.Thread(target=self.send_loop, daemon=True)
 
     def press(self, command: Command) -> str:
-        self.command, self.stamp = command, time.monotonic()
+        self.command = command
+        self.pressed_at = time.monotonic()
         return f"vx {command.vx:+.2f}  wz {command.wz:+.2f}"
 
-    def loop(self) -> None:
+    def forward(self) -> str:
+        return self.press(Command(vx=LINEAR, wz=0.0))
+
+    def back(self) -> str:
+        return self.press(Command(vx=-LINEAR, wz=0.0))
+
+    def turn_left(self) -> str:
+        return self.press(Command(vx=0.0, wz=ANGULAR))
+
+    def turn_right(self) -> str:
+        return self.press(Command(vx=0.0, wz=-ANGULAR))
+
+    def stop(self) -> str:
+        return self.press(STOP)
+
+    def send_loop(self) -> None:
         rate = show.Rate(HZ)
         while self.running:
-            command = limit(deadman(self.command, time.monotonic() - self.stamp, HOLD_S))
+            key_age_s = time.monotonic() - self.pressed_at
+            command = deadman(self.command, key_age_s, HOLD_S)
+            command = limit(command)
             try:
                 with self.lock:
                     send(self.pnc, command)
-                self.sent, self.error = command, ""
+                self.sent = command
+                self.error = ""
             except RuntimeError as error:
                 self.error = str(error)
             rate.sleep()
+
+    def table(self) -> dict[str, dict[str, object]]:
+        """Read by show.live five times per second."""
+        with self.lock:
+            task = self.pnc.get_task_state()
+
+        if self.pressed_at:
+            key_age = f"{time.monotonic() - self.pressed_at:.1f}"
+        else:
+            key_age = "no key yet"
+
+        key_row = {"vx": self.command.vx, "wz": self.command.wz, "age s": key_age}
+        sent_row = {"vx": self.sent.vx, "wz": self.sent.wz, "error": self.error or "-"}
+        task_row = {
+            "id": task.id,
+            "state": TASK_STATES.get(task.state, task.state),
+            "type": TASK_TYPES.get(task.type, task.type),
+            "message": task.message or "-",
+        }
+        return {"key": key_row, "sent": sent_row, "task": task_row}
 
 
 def main() -> None:
     if agibot_gdk.gdk_init() != agibot_gdk.GDKRes.kSuccess:
         sys.exit("gdk_init failed")
     pnc = agibot_gdk.Pnc()
-    keys = Keys(pnc)
+    session = DriveSession(pnc)
 
-    def read() -> dict:
-        with keys.lock:
-            task = pnc.get_task_state()
-        age = f"{time.monotonic() - keys.stamp:.1f}" if keys.stamp else "no key yet"
-        return {"key": {"vx": keys.command.vx, "wz": keys.command.wz, "age s": age},
-                "sent": {"vx": keys.sent.vx, "wz": keys.sent.wz, "error": keys.error or "-"},
-                "task": {"id": task.id, "state": TASK_STATES.get(task.state, task.state),
-                         "type": TASK_TYPES.get(task.type, task.type), "message": task.message or "-"}}
-
-    bindings = {"w": Command(vx=LINEAR, wz=0.0), "s": Command(vx=-LINEAR, wz=0.0),
-                "a": Command(vx=0.0, wz=ANGULAR), "d": Command(vx=0.0, wz=-ANGULAR), " ": STOP}
+    keys = {
+        "w": session.forward,
+        "s": session.back,
+        "a": session.turn_left,
+        "d": session.turn_right,
+        " ": session.stop,
+    }
     try:
         time.sleep(2.0)
         take_control(pnc)
-        keys.thread.start()
-        show.live(read, hz=5.0, keys={key: (lambda c=c: keys.press(c)) for key, c in bindings.items()},
-                  help="w s forward/back   a d turn   space stop")
+        session.thread.start()
+        show.live(session.table, hz=5.0, keys=keys, help="w s forward/back   a d turn   space stop")
     finally:
-        keys.running = False
-        if keys.thread.is_alive():
-            keys.thread.join()
+        session.running = False
+        if session.thread.is_alive():
+            session.thread.join()
         try:
             release(pnc)
         finally:  # the GDK is released also when the chassis could not be given back

@@ -36,6 +36,7 @@ USAGE = """Enter one of these lines.
   speed <rad/s>                       set the speed for the following moves
   q                                   quit"""
 LIFE_TIME = 5.0
+JOINT_POSITION_MODE = 1  # control_mode of the motion control status; the joint calls need it
 
 
 def ensure_position_mode(robot: agibot_gdk.Robot) -> int:
@@ -44,15 +45,20 @@ def ensure_position_mode(robot: agibot_gdk.Robot) -> int:
     Returns:
         The control mode the robot was in before the call (1, 2 or 3).
     """
-    # TODO: Read control_mode from get_motion_control_status. Call set_control_mode(1) when
-    # it has another value.
+    # TODO: Read control_mode from get_motion_control_status. Call
+    # set_control_mode(JOINT_POSITION_MODE) when it has another value.
     raise NotImplementedError
 
 
 def measured(robot: agibot_gdk.Robot) -> dict[str, float]:
     """Returns the measured position of every body joint in rad, by joint name."""
-    return {state["name"]: state["motor_position"] for state in robot.get_joint_states()["states"]
-            if state["name"] in ALL}
+    joint_states = robot.get_joint_states()
+    positions = {}
+    for state in joint_states["states"]:
+        # get_joint_states also reports joints that are not part of the body, e.g. the grippers.
+        if state["name"] in ALL:
+            positions[state["name"]] = state["motor_position"]
+    return positions
 
 
 def move(robot: agibot_gdk.Robot, targets: dict[str, float], speed: float) -> int:
@@ -83,30 +89,69 @@ def move_head(robot: agibot_gdk.Robot, yaw: float, pitch: float, roll: float, sp
     raise NotImplementedError
 
 
+def read_poses() -> dict[str, dict[str, float]]:
+    """Returns the stored poses by name, an empty dict when none are stored yet."""
+    if not POSES.exists():
+        return {}
+    return json.loads(POSES.read_text())
+
+
+def parse_targets(words: list[str]) -> dict[str, float]:
+    """Turns the words "joint angle joint angle ..." into joint name to angle in rad."""
+    if len(words) % 2 != 0:
+        raise ValueError("The line needs pairs of a joint name and an angle in rad.")
+    targets = {}
+    for index in range(0, len(words), 2):
+        name = words[index]
+        angle = float(words[index + 1])
+        if name not in ALL:
+            raise ValueError("The line needs pairs of a joint name and an angle in rad.")
+        targets[name] = angle
+    return targets
+
+
 def run(robot: agibot_gdk.Robot, line: str, speed: float) -> float:
     """Executes one prompt line and returns the speed for the next one."""
     words = line.split()
-    poses = json.loads(POSES.read_text()) if POSES.exists() else {}
-    if words[0] == "speed":
-        if not 0 < float(words[1]) <= MAX_SPEED:
+    command = words[0]
+
+    if command == "speed":
+        new_speed = float(words[1])
+        if not 0 < new_speed <= MAX_SPEED:
             raise ValueError(f"The speed has to be above 0 and at most {MAX_SPEED} rad/s.")
-        return float(words[1])
-    if words[0] == "save":
-        poses[words[1]] = measured(robot)
+        return new_speed
+
+    if command == "save":
+        pose_name = words[1]
+        poses = read_poses()
+        poses[pose_name] = measured(robot)
         POSES.write_text(json.dumps(poses, indent=2))
-        print(f"saved {words[1]}")
+        print(f"saved {pose_name}")
         return speed
+
     started = time.monotonic()
-    if words[0] == "head":
-        result = move_head(robot, *(float(word) for word in words[1:4]), speed)
-    elif words[0] == "go":
-        result = move(robot, poses[words[1]], speed)
+    if command == "head":
+        yaw = float(words[1])
+        pitch = float(words[2])
+        roll = float(words[3])
+        result = move_head(robot, yaw, pitch, roll, speed)
+    elif command == "go":
+        pose_name = words[1]
+        poses = read_poses()
+        result = move(robot, poses[pose_name], speed)
     else:
-        if len(words) % 2 or any(name not in ALL for name in words[::2]):
-            raise ValueError("The line needs pairs of a joint name and an angle in rad.")
-        result = move(robot, {name: float(value) for name, value in zip(words[::2], words[1::2])}, speed)
-    print(f"result {result} after {time.monotonic() - started:.1f} s")
+        targets = parse_targets(words)
+        result = move(robot, targets, speed)
+    duration = time.monotonic() - started
+    print(f"result {result} after {duration:.1f} s")
     return speed
+
+
+def print_joints(robot: agibot_gdk.Robot) -> None:
+    rows = []
+    for name, position in measured(robot).items():
+        rows.append({"joint": name, "position": position})
+    print(show.table(rows))
 
 
 def main() -> None:
@@ -116,13 +161,14 @@ def main() -> None:
     time.sleep(2.0)
     speed = SPEED
     try:
-        print(f"control mode was {ensure_position_mode(robot)}")
+        previous_mode = ensure_position_mode(robot)
+        print(f"control mode was {previous_mode}")
         print(USAGE)
         while True:
-            print(show.table([{"joint": name, "position": position} for name, position in measured(robot).items()]))
+            print_joints(robot)
             try:
                 line = input(f"\n{speed} rad/s > ").strip()
-            except EOFError:
+            except EOFError:  # the input ended, e.g. a file piped into the script
                 break
             if line == "q":
                 break
@@ -131,6 +177,7 @@ def main() -> None:
             try:
                 speed = run(robot, line, speed)
             except (RuntimeError, KeyError, ValueError, IndexError) as error:
+                # A typo or a rejected target should not end the script.
                 print(f"{type(error).__name__}: {error}\n{USAGE}")
     finally:
         agibot_gdk.gdk_release()

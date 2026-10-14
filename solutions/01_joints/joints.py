@@ -32,7 +32,8 @@ def connect() -> agibot_gdk.Robot:
         RuntimeError: gdk_init did not return kSuccess.
     """
     # TODO: Initialise the GDK, create the Robot, wait 2 s and return the Robot.
-    if agibot_gdk.gdk_init() != agibot_gdk.GDKRes.kSuccess:
+    result = agibot_gdk.gdk_init()
+    if result != agibot_gdk.GDKRes.kSuccess:
         raise RuntimeError("gdk_init failed")
     robot = agibot_gdk.Robot()
     time.sleep(2.0)
@@ -46,25 +47,42 @@ def read_joints(robot: agibot_gdk.Robot) -> list[Joint]:
         One Joint per joint, in the order the GDK reports them.
     """
     # TODO: Call get_joint_states and build one Joint per entry.
-    return [
-        Joint(name=state["name"], position=state["motor_position"], velocity=state["motor_velocity"],
-              effort=state["effort"])
-        for state in robot.get_joint_states()["states"]
-    ]
+    joint_states = robot.get_joint_states()
+    joints = []
+    for state in joint_states["states"]:
+        joint = Joint(
+            name=state["name"],
+            position=state["motor_position"],
+            velocity=state["motor_velocity"],
+            effort=state["effort"],
+        )
+        joints.append(joint)
+    return joints
 
 
-def with_limits(joints: list[Joint]) -> list[dict]:
+def with_limits(joints: list[Joint]) -> list[dict[str, object]]:
     """Adds the lower and upper limit of each joint as table columns."""
-    unknown = (float("nan"), float("nan"))
-    return [{**asdict(joint), "min": LIMITS.get(joint.name, unknown)[0], "max": LIMITS.get(joint.name, unknown)[1]}
-            for joint in joints]
+    rows = []
+    for joint in joints:
+        # Joints without an entry in LIMITS show nan.
+        lower, upper = LIMITS.get(joint.name, (float("nan"), float("nan")))
+        row = asdict(joint)
+        row["min"] = lower
+        row["max"] = upper
+        rows.append(row)
+    return rows
 
 
 def main() -> None:
     robot = connect()
+
+    def read_table() -> list[dict[str, object]]:
+        joints = read_joints(robot)
+        return with_limits(joints)
+
     try:
         jog = Jog(robot)
-        show.live(lambda: with_limits(read_joints(robot)), keys=jog.keys, help=jog.help)
+        show.live(read_table, keys=jog.keys, help=jog.help)
     finally:
         agibot_gdk.gdk_release()
 

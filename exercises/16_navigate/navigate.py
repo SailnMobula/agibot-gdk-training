@@ -15,10 +15,12 @@ Open http://localhost:8000. A goal is set first and checked at once; a separate 
 
 from __future__ import annotations
 
+import functools
 import math
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import agibot_gdk
@@ -30,15 +32,30 @@ CLEARANCE = 0.4  # m, a goal closer to an occupied cell is rejected
 MAX_RELATIVE_MOVE = 1.5  # m
 TIMEOUT_S = 120.0
 POLL_S = 0.2
+
+# The values of the cells in grid_map.data.
+CELL_FREE = 0
+CELL_OCCUPIED = 100
+
 TASK_STATES = {0: "idle", 1: "starting", 2: "running", 3: "pausing", 4: "paused", 5: "resuming", 6: "canceling",
                7: "canceled", 8: "fail", 9: "success"}
 TASK_TYPES = {0: "idle", 1: "navigation", 2: "high precision", 3: "remote control", 4: "relative move",
               5: "path navigation"}
-ENDED = ("idle", "canceled", "fail", "success")
-GOAL_OK, GOAL_BAD = (0, 160, 255), (0, 0, 255)  # BGR
-LEGEND = [("free", (255, 255, 255)), ("occupied", (0, 0, 0)), ("unknown", (128, 128, 128)),
-          ("guide point", (255, 120, 0)), ("robot", (0, 160, 0)), ("goal, check ok", GOAL_OK),
-          ("goal with problems", GOAL_BAD)]
+FINISHED_STATES = ("canceled", "fail", "success")  # a task in one of these states has ended
+
+# Colours in BGR, the channel order of OpenCV.
+GOAL_OK_COLOR = (0, 160, 255)
+GOAL_BAD_COLOR = (0, 0, 255)
+LEGEND = [
+    ("free", (255, 255, 255)),
+    ("occupied", (0, 0, 0)),
+    ("unknown", (128, 128, 128)),
+    ("guide point", (255, 120, 0)),
+    ("robot", (0, 160, 0)),
+    ("goal, check ok", GOAL_OK_COLOR),
+    ("goal with problems", GOAL_BAD_COLOR),
+]
+NO_GOAL_HINT = "click on the map, press 1 to 9 or x"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -94,26 +111,26 @@ def cancel(pnc: agibot_gdk.Pnc) -> None:
     raise NotImplementedError
 
 
-def on_map(info: object, x: float, y: float) -> bool:
+def on_map(info: agibot_gdk.MapInfo, x: float, y: float) -> bool:
     """Tells whether x, y lies inside the grid of the map."""
     # TODO: maps.cell_of returns row and column of the cell, or None outside the map.
     raise NotImplementedError
 
 
-def is_free(info: object, x: float, y: float) -> bool:
+def is_free(info: agibot_gdk.MapInfo, x: float, y: float) -> bool:
     """Tells whether the cell of x, y is free. x, y has to be on the map."""
     # TODO: maps.cells(info) is the grid as an array, indexed with the row and column from
     # maps.cell_of. 0 is free, -1 unknown, 100 occupied.
     raise NotImplementedError
 
 
-def has_clearance(info: object, x: float, y: float, clearance: float) -> bool:
+def has_clearance(info: agibot_gdk.MapInfo, x: float, y: float, clearance: float) -> bool:
     """Tells whether no occupied cell lies within clearance in m of x, y. x, y has to be on the map."""
     # TODO: maps.cells_around gives the grid values in a square around x, y. Is any of them 100?
     raise NotImplementedError
 
 
-def check_goal(info: object, x: float, y: float, clearance: float) -> list[str]:
+def check_goal(info: agibot_gdk.MapInfo, x: float, y: float, clearance: float) -> list[str]:
     """Returns the problems of a goal on the map, an empty list when there are none.
 
     It can only check what the GDK hands out: the grid. No-go zones and virtual walls are not
@@ -137,20 +154,26 @@ def navigate_to(pnc: agibot_gdk.Pnc, x: float, y: float, yaw: float, timeout: fl
 
 
 def status(current: Task) -> str:
-    attempts = f" ({current.attempts} attempts)" if current.attempts > 1 else ""
-    return f"task {current.id} {current.type} {current.state}{attempts} {current.message}".rstrip()
+    """One line about a task, e.g. "task 7 navigation fail (5 attempts) goal occupied"."""
+    if current.attempts > 1:
+        attempts = f" ({current.attempts} attempts)"
+    else:
+        attempts = ""
+    line = f"task {current.id} {current.type} {current.state}{attempts} {current.message}"
+    return line.rstrip()
 
 
 class Controller:
     """The keys, the click and the table. A goal is set and checked first, a key sends it."""
 
     def __init__(self, pnc: agibot_gdk.Pnc, slam: agibot_gdk.Slam, map_api: agibot_gdk.Map) -> None:
-        self.pnc, self.slam = pnc, slam
+        self.pnc = pnc
+        self.slam = slam
         self.info = maps.current_map(map_api)
         self.view = maps.MapView(self.info)
-        self.goal: tuple[float, float, float] | None = None
+        self.goal: tuple[float, float, float] | None = None  # x, y in m and yaw in rad
         self.waited = "-"  # the result of the last go and wait
-        self.waiter: threading.Thread | None = None
+        self.waiter: threading.Thread | None = None  # the thread that runs navigate_to
 
     def set_goal(self, x: float, y: float, yaw: float) -> str:
         self.goal = (x, y, yaw)
@@ -158,102 +181,161 @@ class Controller:
 
     def on_click(self, u: float, v: float) -> None:
         point = self.view.to_world(u, v)
-        if point is not None:  # None on the legend
-            x, y = point
-            rx, ry, _ = maps.robot_pose(self.slam)
-            self.set_goal(x, y, math.atan2(y - ry, x - rx))
+        if point is None:
+            return  # a click on the legend
+        x, y = point
+        robot_x, robot_y, _ = maps.robot_pose(self.slam)
+        # The goal faces along the line from the robot to the click.
+        yaw_away_from_robot = math.atan2(y - robot_y, x - robot_x)
+        self.set_goal(x, y, yaw_away_from_robot)
 
     def guide(self, number: int) -> str:
-        point = next((p for p in self.view.guides if p.id == number), None)
-        if point is None:
-            raise ValueError(f"no guide point {number}, the map has {[p.id for p in self.view.guides]}")
-        return self.set_goal(point.x, point.y, point.yaw)
+        for point in self.view.guides:
+            if point.id == number:
+                return self.set_goal(point.x, point.y, point.yaw)
+        ids = [point.id for point in self.view.guides]
+        raise ValueError(f"no guide point {number}, the map has {ids}")
 
     def typed_goal(self, text: str) -> str:
-        x, y, yaw = (float(value) for value in text.split())
-        return self.set_goal(x, y, math.radians(yaw))
+        words = text.split()
+        if len(words) != 3:
+            raise ValueError("type three numbers: x y yaw")
+        x = float(words[0])
+        y = float(words[1])
+        yaw = math.radians(float(words[2]))
+        return self.set_goal(x, y, yaw)
 
     def relative(self, text: str) -> str:
-        dx, dy, dyaw = (float(value) for value in text.split())
+        words = text.split()
+        if len(words) != 3:
+            raise ValueError("type three numbers: dx dy dyaw")
+        dx = float(words[0])
+        dy = float(words[1])
+        dyaw = math.radians(float(words[2]))
         if math.hypot(dx, dy) > MAX_RELATIVE_MOVE:
             raise ValueError(f"a relative move is at most {MAX_RELATIVE_MOVE} m")
-        relative_move(self.pnc, dx, dy, math.radians(dyaw))
+        relative_move(self.pnc, dx, dy, dyaw)
         return "relative move sent"
 
     def send(self) -> str:
         if self.goal is None:
-            raise ValueError("no goal: click on the map, press 1 to 9 or x")
-        go(self.pnc, *self.goal)
+            raise ValueError(f"no goal: {NO_GOAL_HINT}")
+        x, y, yaw = self.goal
+        go(self.pnc, x, y, yaw)
         return "goal sent, watch the task"
 
     def send_and_wait(self) -> str:
         """Runs navigate_to on its own thread, so that p, r and c still work meanwhile."""
         if self.goal is None:
-            raise ValueError("no goal: click on the map, press 1 to 9 or x")
-        if self.waiter and self.waiter.is_alive():
+            raise ValueError(f"no goal: {NO_GOAL_HINT}")
+        if self.waiter is not None and self.waiter.is_alive():
             raise ValueError("navigate_to is still waiting")
-
-        def run(goal: tuple[float, float, float]) -> None:
-            try:
-                self.waited = status(navigate_to(self.pnc, *goal, TIMEOUT_S))
-            except (RuntimeError, NotImplementedError) as error:
-                self.waited = f"{type(error).__name__}: {error}"
-
         self.waited = "waiting"
-        self.waiter = threading.Thread(target=run, args=(self.goal,), daemon=True)
+        self.waiter = threading.Thread(target=self.wait_for_goal, args=(self.goal,), daemon=True)
         self.waiter.start()
         return "navigate_to started"
 
-    def checks(self) -> tuple[dict, bool]:
+    def wait_for_goal(self, goal: tuple[float, float, float]) -> None:
+        """Runs on the waiter thread. Writes the result of navigate_to into self.waited."""
+        x, y, yaw = goal
+        try:
+            ended = navigate_to(self.pnc, x, y, yaw, TIMEOUT_S)
+            self.waited = status(ended)
+        except (RuntimeError, NotImplementedError) as error:
+            self.waited = f"{type(error).__name__}: {error}"
+
+    def on_pause(self) -> str:
+        pause(self.pnc)
+        return "pause sent"
+
+    def on_resume(self) -> str:
+        resume(self.pnc)
+        return "resume sent"
+
+    def on_cancel(self) -> str:
+        cancel(self.pnc)
+        return "cancel sent"
+
+    def checks(self) -> tuple[dict[str, object], bool]:
         """The goal with the answers of your checks, and whether check_goal found no problem."""
         if self.goal is None:
-            return {"goal": "click on the map, press 1 to 9 or x"}, True
+            return {"goal": NO_GOAL_HINT}, True
+
         x, y, yaw = self.goal
-        row: dict = {"x": x, "y": y, "yaw deg": math.degrees(yaw)}
+        row: dict[str, object] = {"x": x, "y": y, "yaw deg": math.degrees(yaw)}
         try:
-            row["on map"] = on_map(self.info, x, y)
-            if row["on map"]:
+            is_on_map = on_map(self.info, x, y)
+            row["on map"] = is_on_map
+            if is_on_map:  # is_free and has_clearance need a cell of the map
                 row["free"] = is_free(self.info, x, y)
                 row["clearance"] = has_clearance(self.info, x, y, CLEARANCE)
             problems = check_goal(self.info, x, y, CLEARANCE)
         except NotImplementedError:
             row["check_goal"] = "not written yet"
             return row, True
-        row["check_goal"] = ", ".join(problems) or "ok"
-        return row, not problems
+
+        if problems:
+            row["check_goal"] = ", ".join(problems)
+        else:
+            row["check_goal"] = "ok"
+        is_ok = len(problems) == 0
+        return row, is_ok
 
     def image(self) -> np.ndarray:
-        _, ok = self.checks()
-        view = self.view.draw(robot=maps.robot_pose(self.slam), goal=self.goal, goal_color=GOAL_OK if ok else GOAL_BAD)
+        _, is_ok = self.checks()
+        if is_ok:
+            goal_color = GOAL_OK_COLOR
+        else:
+            goal_color = GOAL_BAD_COLOR
+        robot = maps.robot_pose(self.slam)
+        view = self.view.draw(robot=robot, goal=self.goal, goal_color=goal_color)
         return maps.with_legend(view, LEGEND)
 
-    def table(self) -> dict:
+    def table(self) -> dict[str, object]:
         x, y, yaw = maps.robot_pose(self.slam)
+        robot_section = {"x": x, "y": y, "yaw deg": math.degrees(yaw)}
+        goal_section, _ = self.checks()
         current = task(self.pnc)  # the table needs your task
-        return {"robot": {"x": x, "y": y, "yaw deg": math.degrees(yaw)}, "goal": self.checks()[0],
-                "task": {"id": current.id, "state": current.state, "type": current.type,
-                         "message": current.message or "-", "attempts": current.attempts,
-                         "go and wait": self.waited}}
+        task_section = {
+            "id": current.id,
+            "state": current.state,
+            "type": current.type,
+            "message": current.message or "-",
+            "attempts": current.attempts,
+            "go and wait": self.waited,
+        }
+        table = {"robot": robot_section, "goal": goal_section, "task": task_section}
+        return table
 
-    def keys(self) -> dict:
-        keys = {str(number): (lambda number=number: self.guide(number)) for number in range(1, 10)}
-        return {**keys, "x": show.Line("goal x y yaw (m, m, deg):", self.typed_goal),
-                "g": self.send, "w": self.send_and_wait,
-                "p": lambda: pause(self.pnc) or "pause sent", "r": lambda: resume(self.pnc) or "resume sent",
-                "c": lambda: cancel(self.pnc) or "cancel sent",
-                "m": show.Line(f"relative move dx dy dyaw (m, m, deg), at most {MAX_RELATIVE_MOVE} m:", self.relative)}
+    def keys(self) -> dict[str, Callable[[], object] | show.Line]:
+        keys: dict[str, Callable[[], object] | show.Line] = {}
+        for number in range(1, 10):
+            # functools.partial(self.guide, 3) is a function without arguments that calls self.guide(3).
+            keys[str(number)] = functools.partial(self.guide, number)
+        keys["x"] = show.Line("goal x y yaw (m, m, deg):", self.typed_goal)
+        keys["g"] = self.send
+        keys["w"] = self.send_and_wait
+        keys["p"] = self.on_pause
+        keys["r"] = self.on_resume
+        keys["c"] = self.on_cancel
+        keys["m"] = show.Line(f"relative move dx dy dyaw (m, m, deg), at most {MAX_RELATIVE_MOVE} m:", self.relative)
+        return keys
 
 
 def main() -> None:
     if agibot_gdk.gdk_init() != agibot_gdk.GDKRes.kSuccess:
         sys.exit("gdk_init failed")
-    pnc, slam, map_api = agibot_gdk.Pnc(), agibot_gdk.Slam(), agibot_gdk.Map()
+    pnc = agibot_gdk.Pnc()
+    slam = agibot_gdk.Slam()
+    map_api = agibot_gdk.Map()
     time.sleep(2.0)
     try:
         ui = Controller(pnc, slam, map_api)
-        viewer.start({"map": ui.image}, hz=2.0, clicks={"map": ui.on_click})
-        show.live(ui.table, hz=2.0, keys=ui.keys(),
-                  help="click / 1-9 / x goal   g go   w go and wait   p pause  r resume  c cancel   m relative move")
+        images = {"map": ui.image}
+        clicks = {"map": ui.on_click}
+        viewer.start(images, hz=2.0, clicks=clicks)
+        help_line = "click / 1-9 / x goal   g go   w go and wait   p pause  r resume  c cancel   m relative move"
+        show.live(ui.table, hz=2.0, keys=ui.keys(), help=help_line)
     finally:
         agibot_gdk.gdk_release()
 

@@ -58,9 +58,17 @@ def main() -> None:
         sys.exit("gdk_init failed")
     robot = agibot_gdk.Robot()
     time.sleep(2.0)
+
+    def read_table() -> dict[str, object]:
+        table = {
+            "motion control": control_state(robot),
+            "body": body_state(robot),
+            "batteries": batteries(robot),
+        }
+        return table
+
     try:
-        show.live(lambda: {"motion control": control_state(robot), "body": body_state(robot),
-                           "batteries": batteries(robot)}, hz=2.0)
+        show.live(read_table, hz=2.0)
     finally:
         agibot_gdk.gdk_release()
 

@@ -45,18 +45,29 @@ def read_joints(robot: agibot_gdk.Robot) -> list[Joint]:
     raise NotImplementedError
 
 
-def with_limits(joints: list[Joint]) -> list[dict]:
+def with_limits(joints: list[Joint]) -> list[dict[str, object]]:
     """Adds the lower and upper limit of each joint as table columns."""
-    unknown = (float("nan"), float("nan"))
-    return [{**asdict(joint), "min": LIMITS.get(joint.name, unknown)[0], "max": LIMITS.get(joint.name, unknown)[1]}
-            for joint in joints]
+    rows = []
+    for joint in joints:
+        # Joints without an entry in LIMITS show nan.
+        lower, upper = LIMITS.get(joint.name, (float("nan"), float("nan")))
+        row = asdict(joint)
+        row["min"] = lower
+        row["max"] = upper
+        rows.append(row)
+    return rows
 
 
 def main() -> None:
     robot = connect()
+
+    def read_table() -> list[dict[str, object]]:
+        joints = read_joints(robot)
+        return with_limits(joints)
+
     try:
         jog = Jog(robot)
-        show.live(lambda: with_limits(read_joints(robot)), keys=jog.keys, help=jog.help)
+        show.live(read_table, keys=jog.keys, help=jog.help)
     finally:
         agibot_gdk.gdk_release()
 

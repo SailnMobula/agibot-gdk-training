@@ -40,12 +40,19 @@ def frames(robot: agibot_gdk.Robot) -> list[Frame]:
     """
     # TODO: Call get_motion_control_status and combine frame_names, frame_poses and wrenches.
     status = robot.get_motion_control_status()
-    return [
-        Frame(name=name, position=(pose.position.x, pose.position.y, pose.position.z),
-              force=(wrench.force.x, wrench.force.y, wrench.force.z),
-              torque=(wrench.torque.x, wrench.torque.y, wrench.torque.z))
-        for name, pose, wrench in zip(status.frame_names, status.frame_poses, status.wrenches)
-    ]
+    result = []
+    # The three lists have the same order, so entry i of each belongs to the same frame.
+    for index, name in enumerate(status.frame_names):
+        pose = status.frame_poses[index]
+        wrench = status.wrenches[index]
+        frame = Frame(
+            name=name,
+            position=(pose.position.x, pose.position.y, pose.position.z),
+            force=(wrench.force.x, wrench.force.y, wrench.force.z),
+            torque=(wrench.torque.x, wrench.torque.y, wrench.torque.z),
+        )
+        result.append(frame)
+    return result
 
 
 def disturbance(robot: agibot_gdk.Robot) -> list[JointTorque]:
@@ -55,8 +62,14 @@ def disturbance(robot: agibot_gdk.Robot) -> list[JointTorque]:
         14 entries. The seven joints of the left arm come first, then the right arm.
     """
     # TODO: Pair arm_disturbance_force of the motion control status with LEFT_ARM + RIGHT_ARM.
-    torques = robot.get_motion_control_status().arm_disturbance_force
-    return [JointTorque(joint=name, torque=torque) for name, torque in zip(LEFT_ARM + RIGHT_ARM, torques)]
+    status = robot.get_motion_control_status()
+    torques = status.arm_disturbance_force
+    arm_joints = LEFT_ARM + RIGHT_ARM  # the same order as torques
+    result = []
+    for index, joint_name in enumerate(arm_joints):
+        joint_torque = JointTorque(joint=joint_name, torque=torques[index])
+        result.append(joint_torque)
+    return result
 
 
 def main() -> None:
@@ -64,10 +77,17 @@ def main() -> None:
         sys.exit("gdk_init failed")
     robot = agibot_gdk.Robot()
     time.sleep(2.0)
+
+    def read_table() -> dict[str, object]:
+        table = {
+            "frames in base_link": frames(robot),
+            "external joint torque": disturbance(robot),
+        }
+        return table
+
     try:
         jog = Jog(robot, "idx27_arm_l_joint7")
-        show.live(lambda: {"frames in base_link": frames(robot), "external joint torque": disturbance(robot)},
-                  keys=jog.keys, help=jog.help)
+        show.live(read_table, keys=jog.keys, help=jog.help)
     finally:
         agibot_gdk.gdk_release()
 

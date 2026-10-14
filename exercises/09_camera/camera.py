@@ -58,15 +58,35 @@ def grab(camera: agibot_gdk.Camera, camera_type: agibot_gdk.CameraType) -> np.nd
     raise NotImplementedError
 
 
+class ImageSource:
+    """Hands the latest image of one camera to the viewer."""
+
+    def __init__(self, camera: agibot_gdk.Camera, camera_type: agibot_gdk.CameraType) -> None:
+        self.camera = camera
+        self.camera_type = camera_type
+
+    def read(self) -> np.ndarray | None:
+        return grab(self.camera, self.camera_type)
+
+
 def main() -> None:
     if agibot_gdk.gdk_init() != agibot_gdk.GDKRes.kSuccess:
         sys.exit("gdk_init failed")
     camera = agibot_gdk.Camera(list(CAMERAS.values()))
     time.sleep(3.0)
     try:
-        print(show.table([{"camera": name, **asdict(info(camera, camera_type))} for name, camera_type in CAMERAS.items()]))
-        viewer.serve({name: (lambda camera_type=camera_type: grab(camera, camera_type))
-                      for name, camera_type in CAMERAS.items()})
+        rows = []
+        for name, camera_type in CAMERAS.items():
+            row = {"camera": name}
+            row.update(asdict(info(camera, camera_type)))
+            rows.append(row)
+        print(show.table(rows))
+
+        streams = {}
+        for name, camera_type in CAMERAS.items():
+            source = ImageSource(camera, camera_type)
+            streams[name] = source.read
+        viewer.serve(streams)
     finally:
         camera.close_camera()
         agibot_gdk.gdk_release()

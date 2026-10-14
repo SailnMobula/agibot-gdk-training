@@ -19,6 +19,7 @@ from gdk_training import cloud3d, geometry, show
 LIDARS = {"front": agibot_gdk.LidarType.kLidarFront, "back": agibot_gdk.LidarType.kLidarBack}
 EXTRINSICS = {"front": agibot_gdk.SensorExtrinsicType.kChassisFrontLidarToBaseLink,
               "back": agibot_gdk.SensorExtrinsicType.kChassisBackLidarToBaseLink}
+# The datatype codes of a PointField and the numpy type each one stands for, as in ROS PointCloud2.
 DATATYPES = {1: "i1", 2: "u1", 3: "<i2", 4: "<u2", 5: "<i4", 6: "<u4", 7: "<f4", 8: "<f8"}
 TIMEOUT_MS = 200.0
 LATENCY_WINDOW_S = 5.0
@@ -42,14 +43,14 @@ def info(lidar: agibot_gdk.Lidar, name: str) -> LidarInfo:
     raise NotImplementedError
 
 
-def decode(cloud: object) -> np.ndarray:
+def decode(cloud: agibot_gdk.PointCloud) -> np.ndarray:
     """Returns the points of a cloud as an (N, 3) float array x, y, z in m, in the sensor frame."""
     # TODO: Build a numpy dtype with the names x, y, z, their types and offsets from cloud.fields
     # and itemsize point_step. Read data with np.frombuffer and stack the three columns.
     raise NotImplementedError
 
 
-def reflectivity(cloud: object) -> np.ndarray:
+def reflectivity(cloud: agibot_gdk.PointCloud) -> np.ndarray:
     """Stretch: returns the reflectivity of every point, (N,) from 0 to 255."""
     # TODO: Like decode, for the field reflectivity.
     raise NotImplementedError
@@ -74,33 +75,67 @@ def height_band(points: np.ndarray, z_min: float, z_max: float) -> np.ndarray:
     raise NotImplementedError
 
 
-def main() -> None:
-    if agibot_gdk.gdk_init() != agibot_gdk.GDKRes.kSuccess:
-        sys.exit("gdk_init failed")
-    lidar, tf = agibot_gdk.Lidar(), agibot_gdk.TF()
-    time.sleep(2.0)
-    band = {"on": False}
+class LidarDisplay:
+    """What the 3D view and the table show, and the key b that switches the height band."""
 
-    def layer(name: str) -> np.ndarray:
-        cloud = lidar.get_latest_pointcloud(LIDARS[name], TIMEOUT_MS)
-        points = to_base(decode(cloud), sensor_to_base(tf, name))
+    def __init__(self, lidar: agibot_gdk.Lidar, tf: agibot_gdk.TF) -> None:
+        self.lidar = lidar
+        self.tf = tf
+        self.band_on = False
+
+    def points(self, name: str) -> np.ndarray:
+        """The cloud of one lidar in base_link, with the reflectivity as fourth column when it is written."""
+        cloud = self.lidar.get_latest_pointcloud(LIDARS[name], TIMEOUT_MS)
+        points_in_sensor = decode(cloud)
+        points = to_base(points_in_sensor, sensor_to_base(self.tf, name))
         try:
             points = np.column_stack([points, reflectivity(cloud)])
         except NotImplementedError:
-            pass
-        if band["on"]:
-            points = height_band(points, *BAND)  # the reflectivity column comes along
+            pass  # the stretch is not written yet, the view colours by height then
+        if self.band_on:
+            z_min, z_max = BAND
+            points = height_band(points, z_min, z_max)  # the reflectivity column comes along
         return points
 
-    def toggle() -> str:
-        band["on"] = not band["on"]
-        return f"height band {BAND[0]} to {BAND[1]} m {'on' if band['on'] else 'off'}"
+    def front_points(self) -> np.ndarray:
+        return self.points("front")
 
+    def back_points(self) -> np.ndarray:
+        return self.points("back")
+
+    def table(self) -> list[LidarInfo]:
+        rows: list[LidarInfo] = []
+        for name in LIDARS:
+            rows.append(info(self.lidar, name))
+        return rows
+
+    def toggle_band(self) -> str:
+        self.band_on = not self.band_on
+        if self.band_on:
+            switched = "on"
+        else:
+            switched = "off"
+        return f"height band {BAND[0]} to {BAND[1]} m {switched}"
+
+
+def robot_at_origin() -> np.ndarray:
+    """The pose of the robot in the 3D view. The view is base_link, so the robot is at its origin."""
+    return np.eye(4)
+
+
+def main() -> None:
+    if agibot_gdk.gdk_init() != agibot_gdk.GDKRes.kSuccess:
+        sys.exit("gdk_init failed")
+    lidar = agibot_gdk.Lidar()
+    tf = agibot_gdk.TF()
+    time.sleep(2.0)
+    display = LidarDisplay(lidar, tf)
     try:
-        cloud3d.start({name: (lambda name=name: layer(name)) for name in LIDARS}, robot=lambda: np.eye(4),
-                      title="Lidar in base_link")
-        show.live(lambda: [info(lidar, name) for name in LIDARS], hz=1.0, keys={"b": toggle},
-                  help="b height band")
+        layers = {"front": display.front_points, "back": display.back_points}
+        cloud3d.start(layers, robot=robot_at_origin, title="Lidar in base_link")
+
+        keys = {"b": display.toggle_band}
+        show.live(display.table, hz=1.0, keys=keys, help="b height band")
     finally:
         lidar.close_lidar()
         agibot_gdk.gdk_release()
