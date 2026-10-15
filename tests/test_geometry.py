@@ -39,3 +39,10 @@ def test_line_keeps_the_orientation_of_a_half_turn_pose() -> None:
 def test_inverse_undoes_a_pose() -> None:
     pose = geometry.matrix((0.4, -0.2, 1.1), (0.1, 0.2, 0.3, 0.9))
     assert np.allclose(geometry.inverse(pose) @ pose, np.eye(4))
+
+
+@pytest.mark.parametrize("angles", [(0, 0, 0), (0, 0, 90), (0, 0, -90), (0, 0, 179), (10, -20, 30), (-45, 60, 150)])
+def test_quaternion_from_rpy_is_the_inverse_of_rpy(angles: tuple[float, float, float]) -> None:
+    roll, pitch, yaw = np.radians(angles)
+    pose = geometry.matrix((0, 0, 0), geometry.quaternion_from_rpy(roll, pitch, yaw))
+    assert np.allclose(geometry.rpy(pose), (roll, pitch, yaw), atol=1e-9)

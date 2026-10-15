@@ -116,7 +116,10 @@ def sensor_to_base(tf: agibot_gdk.TF, name: str) -> geometry.Matrix:
 
 def to_base(points: np.ndarray, transform: geometry.Matrix) -> np.ndarray:
     """Applies a 4x4 matrix to (N, 3) points."""
-    # TODO: Rotate with transform[:3, :3] and add transform[:3, 3], for all points at once.
+    # TODO: The upper left 3x3 block of transform is the rotation, the right column the translation:
+    # rotation = transform[:3, :3] and translation = transform[:3, 3]. One point p moves as
+    # rotation @ p + translation. points holds one point per row, so for all points at once:
+    # points @ rotation.T + translation.
     rotation = transform[:3, :3]
     translation = transform[:3, 3]
     # points holds one point per row, so it is multiplied with the transposed rotation from the right.
