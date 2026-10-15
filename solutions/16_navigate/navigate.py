@@ -26,7 +26,7 @@ from dataclasses import dataclass
 import agibot_gdk
 import numpy as np
 
-from gdk_training import maps, show, viewer
+from gdk_training import geometry, maps, show, viewer
 
 CLEARANCE = 0.4  # m, a goal closer to an occupied cell is rejected
 MAX_RELATIVE_MOVE = 1.5  # m
@@ -69,17 +69,17 @@ class Task:
 
 def navi_req(x: float, y: float, yaw: float) -> agibot_gdk.NaviReq:
     """Builds a NaviReq with the target pose x, y in m and yaw in rad."""
-    # TODO: agibot_gdk.NaviReq() has target, a Pose. The yaw goes into the quaternion as
-    # z = sin(yaw / 2), w = cos(yaw / 2).
+    # TODO: agibot_gdk.NaviReq() has target, a Pose. geometry.quaternion_from_rpy gives x, y, z, w
+    # of its orientation. The robot stands on the floor: roll and pitch are 0.
     request = agibot_gdk.NaviReq()
     request.target.position.x = x
     request.target.position.y = y
     request.target.position.z = 0.0
-    # A rotation about the z axis only: x and y of the quaternion stay 0.
-    request.target.orientation.x = 0.0
-    request.target.orientation.y = 0.0
-    request.target.orientation.z = math.sin(yaw / 2)
-    request.target.orientation.w = math.cos(yaw / 2)
+    qx, qy, qz, qw = geometry.quaternion_from_rpy(0.0, 0.0, yaw)
+    request.target.orientation.x = qx
+    request.target.orientation.y = qy
+    request.target.orientation.z = qz
+    request.target.orientation.w = qw
     return request
 
 

@@ -77,6 +77,18 @@ def quaternion(transform: Matrix) -> tuple[float, float, float, float]:
     return float(x), float(y), float(z), float(w)
 
 
+def quaternion_from_rpy(roll: float, pitch: float, yaw: float) -> tuple[float, float, float, float]:
+    """Returns the quaternion x, y, z, w of roll, pitch and yaw in rad, the inverse of rpy."""
+    cos_roll, sin_roll = math.cos(roll / 2), math.sin(roll / 2)
+    cos_pitch, sin_pitch = math.cos(pitch / 2), math.sin(pitch / 2)
+    cos_yaw, sin_yaw = math.cos(yaw / 2), math.sin(yaw / 2)
+    x = sin_roll * cos_pitch * cos_yaw - cos_roll * sin_pitch * sin_yaw
+    y = cos_roll * sin_pitch * cos_yaw + sin_roll * cos_pitch * sin_yaw
+    z = cos_roll * cos_pitch * sin_yaw - sin_roll * sin_pitch * cos_yaw
+    w = cos_roll * cos_pitch * cos_yaw + sin_roll * sin_pitch * sin_yaw
+    return x, y, z, w
+
+
 def rpy(transform: Matrix) -> tuple[float, float, float]:
     """Returns roll, pitch and yaw in rad. Use it to display an orientation."""
     r = transform[:3, :3]
